@@ -1,0 +1,616 @@
+//uses lunar spell to make mahogany planks
+
+program Untitled;
+{$DEFINE SMART}
+{$I SRL/SRL.scar}
+{$I SRL/SRL/skill/magic.scar}
+{$I SRL/SRL/misc/stats.simba}
+{$I SRL/SRL/misc/debug.scar}
+const
+  StatsUser = ''; //Optional: SRL Stats username. NOT runescape or SRL forums username
+  StatsPass = ''; //Optional: SRL Stats password. NOT runescape or SRL forums password
+
+  DDTMTolerance = 30; //Add to the tolerance if script cannot find the DDTM(Log or Plank)
+
+  MaxMouse = 17; //Maximum mouse speed.
+  MinMouse = 14; //Minimum mouse speed.
+
+  DetailedProggy = true; //True = detail progress report, false = standard
+  DetailedDebug = true; //True = detail debugging, false = no debugging
+
+  ChanceForAntiban = 600; //chance to do antiban while smelting.
+
+  TakeBreaks = true; //Do you want to take breaks?
+
+  LoadsTillBreak = 12; //Loads to do until break, leave zero if it doesn't matter or not breaking
+  RLoads = 5; //Plus random loads for break
+
+  TimeTillBreak = 60; //Minuts until break, leave zero if it doesn't matter or not breaking
+  RTime = 20; //Plus random minuts for break
+
+  {
+   NOTE: If using multi player, script just switches to a random active player.
+   If there is only one active player, script will log out for certain amound of time
+  }
+  TimeToBreak = 5; //minuts to break
+  RBreak = 5; //Plus random minuts to break for
+
+const
+  LOG_NORMAL = 0;
+  LOG_OAK = 1;
+  LOG_TEAK = 2;
+  LOG_MAHOGANY = 3;
+
+procedure DeclarePlayers;
+begin
+  //Disguise('Windows Live Messenger');
+
+  HowManyPlayers:= 1;
+  CurrentPlayer:= 0;
+  NumberOfPlayers(HowManyPlayers);
+
+  Smart_Server := 10;
+  Smart_Members := false;
+  Smart_Signed := true;
+  Smart_SuperDetail := False;
+
+  writeln('calling names');
+
+  with players[0] do
+  begin
+    Name := ''; // Username.
+    Pass := ''; // Password.
+    Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+    Pin  := '';
+    Integers[0] := LOG_MAHOGANY; //log to cast on
+    Active := True;
+  end;
+end;
+
+var
+  LastTrip : Boolean;
+  TotalLoadsDone, TotalBanksDone, LogsStart, LogsEnd, AntibansDone, BreaksDone,
+  TimeBreaking, TimeSinceBreak, LoadsSinceBreak, TimeSinceLastCommit : Integer;
+  exp : extended;
+  IA : TIntegerArray;
+  ClosestLogs : TPointArray;
+
+const
+  Priority_High = 1;
+  Priority_Low = 0;
+  AstralID = '';
+  NatureID = '';
+
+Type
+  TLog = record
+    MainPCol, SubPCol, PlankMain, PlankSub : integer;
+    LogUptext, PlankUptext : string;
+    Cost, Profit : integer;
+    Website : string;
+    Casts : integer;
+    LastCast : Boolean;
+  end;
+
+var
+  Log : Array [0..3] of TLog;
+  LogUsed : TLog;
+
+Procedure SetUpLogRecord;
+begin
+  with Log[LOG_NORMAL] do
+  begin
+   MainPCol := 10;
+   SubPCol := 5;
+   PlankMain := 0;
+   PlankSub := 0;
+   LogUptext := 'log';
+   PlankUptext := 'plank';
+   Cost := 100;
+   Profit := 500;
+   Website := 'www.com';
+   LastCast := false;
+  end;
+
+  with Log[LOG_OAK] do
+  begin
+   MainPCol := 10;
+   SubPCol := 5;
+   PlankMain := 0;
+   PlankSub := 0;
+   LogUptext := 'log';
+   PlankUptext := 'plank';
+   Cost := 100;
+   Profit := 500;
+   Website := 'www.com';
+   LastCast := false;
+  end;
+
+  with Log[LOG_TEAK] do
+  begin
+   MainPCol := 10;
+   SubPCol := 5;
+   PlankMain := 0;
+   PlankSub := 0;
+   LogUptext := 'log';
+   PlankUptext := 'plank';
+   Cost := 100;
+   Profit := 500;
+   Website := 'www.com';
+   LastCast := false;
+  end;
+
+  with Log[LOG_MAHOGANY] do
+  begin
+   MainPCol := 799060;
+   SubPCol := 6723765;
+   PlankMain := 0;
+   PlankSub := 0;
+   LogUptext := 'y log';
+   PlankUptext := 'y pla';
+   Cost := 100;
+   Profit := 87;
+   Website := 'www.com';
+   LastCast := false;
+  end;
+
+  LogUsed := Log[Players[CurrentPlayer].integers[0]];
+end;
+
+function LogDDTM: Integer;
+var
+  dtmMainPoint: TDTMPointDef;
+  dtmSubPoints: Array [0..2] of TDTMPointDef;
+  TempTDTM: TDTM;
+begin
+  with LogUsed do
+  begin
+    dtmMainPoint.x := 904;
+    dtmMainPoint.y := 366;
+    dtmMainPoint.AreaSize := 10;
+    dtmMainPoint.AreaShape := 0;
+    dtmMainPoint.Color := MainPCol;
+    dtmMainPoint.Tolerance := DDTMTolerance;
+
+    dtmSubPoints[0].x := 904;
+    dtmSubPoints[0].y := 366;
+    dtmSubPoints[0].AreaSize := 10;
+    dtmSubPoints[0].AreaShape := 0;
+    dtmSubPoints[0].Color := MainPCol;
+    dtmSubPoints[0].Tolerance := DDTMTolerance;
+
+    dtmSubPoints[1].x := 918;
+    dtmSubPoints[1].y := 365;
+    dtmSubPoints[1].AreaSize := 6;
+    dtmSubPoints[1].AreaShape := 0;
+    dtmSubPoints[1].Color := SubPCol;
+    dtmSubPoints[1].Tolerance := DDTMTolerance;
+
+    dtmSubPoints[2].x := 906;
+    dtmSubPoints[2].y := 356;
+    dtmSubPoints[2].AreaSize := 6;
+    dtmSubPoints[2].AreaShape := 0;
+    dtmSubPoints[2].Color := SubPCol;
+    dtmSubPoints[2].Tolerance := DDTMTolerance;
+
+    TempTDTM.MainPoint := dtmMainPoint;
+    TempTDTM.SubPoints := dtmSubPoints;
+    Result := AddDTM(TempTDTM);
+  end;
+end;
+
+procedure A_Debug(text: string; priority : integer);
+begin
+  if priority = 0 then
+    if not DetailedDebug then
+      exit;
+    writeln('|| [' + thetime + '] ' + players[currentplayer].nick + ' || ' + text);
+end;
+
+procedure PrintProgress; forward;
+
+Procedure NPlayer;
+begin
+  a_debug('Switching player', Priority_High);
+  {logout;
+  NextPlayer(false);
+  if AllPlayersInactive then
+  begin
+    a_debug('All players inactive, terminating', Priority_High);
+    PrintProgress;
+    terminatescript;
+  end;
+  LogInPlayer; }
+end;
+
+function NumPerHour(i : extended) : extended;
+begin
+  result := (3600 * i) / (1 + ((GetTimeRunning) / 1000));
+end;
+
+procedure GetPrice;
+var
+  page : string;
+begin
+  page := trim(Between('<b>Current guide price:</b> ', '<br>', page));
+
+  page := trim(Between('<b>Current guide price:</b> ', '<br>', page));
+end;
+
+Procedure A_Antiban(percentage : integer);
+var
+  c : integer;
+begin
+ c := random(percentage);
+ if c < 21 then
+   inc(AntibansDone);
+ case c of
+  0..2: Gametab(randomrange(tab_Combat, tab_Notes));
+  3..6: wait(1000 + random(3000));
+  7..9: begin
+           MakeCompass(IntToStr(random(180)));
+           MakeCompass(IntToStr(random(1)));
+         end;
+  10: HoverSkill('smithing', false);
+  11..13: PickUpMouse;
+  14..25: RandomMovement;
+ end;
+ findnormalrandoms;
+end;
+
+function Bank : boolean;
+var
+  x, y, LogDTM, location : integer;
+begin
+  result := false;
+
+  LogUsed.LastCast := false;
+
+  if not loggedin then
+    exit;
+
+  LogDTM := LogDDTM;
+  SetDTMName(LogDTM, 'Bank Log DTM');
+  if CountItems('dtm', LogDTM, []) > 12 then
+  begin
+    freedtm(LogDTM);
+    a_debug('No need to bank', Priority_Low);
+    result := true;
+    exit;
+  end;
+
+  if not OpenBankNPC then
+  begin
+    MakeCompass(90);
+    a_debug('Cannot find banker, attempting to relocate', Priority_High);
+    FindNormalRandoms;
+    if not OpenBankNPC then
+      if not OpenBankFast(Players[CurrentPlayer].Loc) then exit;
+  end;
+  while not BankScreen do
+  begin
+    wait(50 + random(50));
+    FindNormalRandoms;
+  end;
+
+  Deposit(3, 28, true);
+
+  if not FindItem(x, y, 'dtm', LogDTM, MBX1, MBY1, MBX2, MBY2, []) then
+  begin
+    FixBank;
+    if not FindItem(x, y, 'dtm', LogDTM, MBX1, MBY1, MBX2, MBY2, []) then
+    begin
+      a_debug('Place Logs so they are visible in the top of the bank', Priority_High);
+      freedtm(LogDTM);
+      CloseBank;
+      exit;
+    end;
+  end;
+
+  if TotalBanksDone < 1 then
+  begin
+    LogsStart := ItemAmount('bank', 'dtm', LogDTM, []);
+    if TotalLoadsDone = 1 then
+      IncEx(LogsStart, 26);
+    a_debug('Logs Starting with: ' + inttostr(LogsStart), Priority_Low);
+  end;
+
+  LogsEnd := ItemAmount('bank', 'dtm', LogDTM, []);
+  if LogsEnd <= 26 then
+    LastTrip := true;
+  A_Debug('Logs left: ' + inttostr(LogsEnd) + '. Last Trip: ' + booltostr(LastTrip), Priority_Low);
+
+  mmouse(x + 15, y, 5, 5);
+  WaitUptext(LogUsed.LogUptext, 2500);
+  writeln(getuptext);
+  getmousepos(x, y);
+  mouse(x, y, 0, 0, false);
+  WaitOption('ithdraw-All', 5000);
+
+  while not ExistsItemDTM(LogDTM, x, y) do
+    wait(100 + random(100));
+
+  //if random(4) = 0 then
+    CloseBank;
+
+  freedtm(LogDTM);
+  result := InvCount > 2;
+  if not result then
+    a_debug('Messed up banking, failed to withdraw items', Priority_High);
+  SetAngle(true);
+  MakeCompass(0);
+  inc(TotalBanksDone);
+  PrintProgress;
+end;
+
+Function MouseSpell : boolean;
+var
+  x, y : integer;
+begin
+  result := false;
+  if not gametab(tab_Magic) then
+  begin
+    a_debug('Cannot open mage tab, looking for randoms', Priority_Low);
+    if FindNormalRandoms then
+      a_debug('Found random', priority_high);
+    if not gametab(tab_Magic) then
+    begin
+      a_debug('Cannnot open mage tab', Priority_High);
+      NPlayer;
+      exit;
+    end;
+  end;
+  a_debug('Gametab is open', Priority_Low);
+  if not isuptext('ank') then
+  begin
+    mmouse(682, 340, 5, 5);
+    if not waituptext('ank', 5000) then
+    begin
+      A_Debug('Cannot find spell, make sure your on Lunar Spell Book,' + #10 + 'and align spell correctly', Priority_High);
+      exit;
+    end;
+  end;
+    wait(250 + random(150));
+    //mmouse(682, 340, 5, 5);
+    if countcolor(clRed, 555, 414, 719, 459) = 0 then
+    begin
+      getmousepos(x, y);
+      mouse(x, y, 0, 0, true);
+    end else
+    begin
+      A_Debug('Have all the runes, and money required in inventory', Priority_High);
+      exit;
+    end;
+
+
+  a_debug('Waiting for spell uptext', Priority_Low);
+  result := waituptext('ake -', 5000);
+        //green = 65280
+  if result then
+    a_debug('Click spell is success', Priority_Low);
+end;
+
+Function GetClosestLogs : TPointArray;
+var
+  LogDTM, PlankDTM, x, y, i, PatternIndex, currresult : integer;
+  TPA : TPointArray;
+  TB : TBox;
+  invs : TInvenItemArr;
+  InvPattern : Array [0..2] of TIntegerarray;
+begin
+  LogDTM := LogDDTM;
+  SetDTMName(LogDTM, 'Inventory Log DTM 2');
+  setlength(result, 29);
+  invs := GetInventoryArray;
+  for i := 0 to 27 do
+  begin
+
+  end;
+  currresult := high(result);
+
+  InvPattern[0] := [16, 15, 12, 11, 20, 19, 18, 14, 10, 17, 13, 9, 8, 7, 6, 5, 4, 3, 2, 1, 24, 23, 22, 21, 25, 26, 27, 28];
+  InvPattern[1] := [16, 15, 12, 11, 20, 19, 18, 14, 10, 17, 13, 9, 8, 7, 6, 5, 4, 3, 2, 1, 24, 23, 22, 21, 25, 26, 27, 28];
+  InvPattern[2] := [16, 15, 12, 11, 20, 19, 18, 14, 10, 17, 13, 9, 8, 7, 6, 5, 4, 3, 2, 1, 24, 23, 22, 21, 25, 26, 27, 28];
+  PatternIndex := Random(2);
+  for i := 0 to 27 do
+  begin
+    with invs[InvPattern[PatternIndex][i] - 1].ItemBox do
+    if FindDTM(LogDTM, x, y, x1, y1, x2, y2) then
+      result[i] := point(x, y);
+  end;
+  freedtm(LogDTM);
+  //SortTPAFrom(Result, point(682, 340));
+  //DebugTPA(result, '');
+  writeln(result);
+end;
+
+Function MouseClosestLog(coord : TPoint) : Boolean;
+var
+  LogDTM, x, y, timer, Item : integer;
+label
+  Back;
+begin
+  result := false;
+
+  back:
+  FindNormalRandoms;
+
+  LogDTM := LogDDTM;
+  SetDTMName(LogDTM, 'Inventory Log DTM 3');
+  {if FindDTM(LogDTM, x, y, 683, 322, 728, 356) then
+    item := CoordsToItem(x, y)
+  else   //log in slot 16}
+
+  item := CoordsToItem(coord.x, coord.y);
+  freedtm(LogDTM);
+  mmouseitem(item);
+
+  {if not waituptext(LogUsed.LogUptext, 1500) then
+  begin
+    A_Debug('Cannot find log to cast', Priority_High);
+    DeleteValueInTPA(TPA, low(tpa));
+    goto back;
+  end; }
+
+  getmousepos(x, y);
+  mouse(x, y, 0, 0, true);
+  LogUsed.Casts := LogUsed.Casts + 1;
+  mmouse(682, 340, 5, 5);
+  wait(50 + random(100));
+  MarkTime(Timer);
+  while not IsUpText('ake') do
+  begin
+    wait(10 + random(10));
+    if timefrommark(Timer) > 10000 then
+    begin
+      mouse(x, y, 0, 0, true);
+      mmouse(682, 340, 5, 5);
+    end;
+    if timefrommark(Timer) > 20000 then
+      exit;
+  end;
+
+  wait(50 + random(50));
+  a_Debug('Casted spell', Priority_Low);
+  result := true;
+end;
+
+
+Function CastPlanks : boolean;
+var
+  LogDTM, PlankDTM, x, y, i : integer;
+begin
+  result := false;
+
+  LogDTM := LogDDTM;
+  SetDTMName(LogDTM, 'Inventory Log DTM 1');
+
+  ClosestLogs := GetClosestLogs;
+  if high(ClosestLogs) < 1 then
+  begin
+    a_debug('Cannot find closest log', Priority_High);
+    exit;
+  end;
+  repeat
+    gametab(tab_magic);
+
+    a_debug('Attempting to cast spell', Priority_Low);
+    if not MouseSpell then
+    begin
+      a_debug('Attempt to cast spell has failed', Priority_High);
+      exit;
+    end;
+
+    while not GetCurrentTab = tab_Inv do wait(10 + random(10));
+    a_debug('Inventory is open', Priority_Low);
+    //if FindNormalRandoms then
+      //exit;
+    if (CountItems('dtm', LogDTM, []) < 1) then
+    begin
+      a_debug('No logs in inventory', Priority_Low);
+      result := true;
+      if LastTrip then
+      begin
+        NPlayer;
+        exit;
+      end;
+
+      freedtm(LogDTM);
+      exit;
+    end;
+    LogUsed.LastCast := false;
+    if FindItem(x, y, 'dtm', LogDTM, MIX1, MIY1, MIX2, MIY2, []) then
+    begin
+      LogUsed.LastCast := CountItems('dtm', LogDTM, []) = 1;
+      inc(i);
+      if CoordsToItem(ClosestLogs[i].x, ClosestLogs[i].y) < 1 then
+        continue;
+      if not MouseClosestLog(ClosestLogs[i]) then
+      begin
+        a_debug('Cannot click on log', priority_high);
+        freedtm(LogDTM);
+        exit;
+      end;
+    end;
+  until LogUsed.LastCast;
+  freedtm(LogDTM);
+end;
+
+procedure PrintProgress;
+var
+  profit : integer;
+begin
+  {if TimeFromMark(TimeSinceLastCommit) > 1000 * 60 * 6 then
+  begin
+    A_Debug('Attempting to commit to stats', Priority_Low);
+    if stats_Commit then
+    begin
+      marktime(TimeSinceLastCommit);
+      A_Debug('Commited stats', Priority_High);
+    end else
+      A_Debug('Failed to commit stats', Priority_High);
+  end;}
+
+  exp := LogUsed.Casts * 90;
+  profit := LogUsed.Profit * LogUsed.Casts;
+
+  if DetailedProggy then
+  begin
+    writeln(' ');
+    writeln('------------ Awkward Planks -----------');
+    writeln('- Time Running: ' + timerunning);
+    writeln('- Number of Loads(per hour): ' + inttostr(TotalLoadsDone) + '(' + inttostr(floor(NumPerHour(TotalLoadsDone))) + ')');
+    writeln('- Experience Gained(per hour): ' + FloatToStr(exp) + '(' + inttostr(floor(NumPerHour(exp))) + ')');
+    writeln('- Logs Casted(per hour): ' + IntToStr(LogUsed.Casts) + '(' + inttostr(floor(NumPerHour(LogUsed.Casts))) + ')');
+    writeln('- Logs Remaining: ' + IntToStr(LogsEnd));
+    writeln('- Profit made(Per hour): ' + intToStr(profit) + '(' + inttostr(floor(NumPerHour(profit))) + ')');
+    writeln('- Profit per log: ' + IntToStr(LogUsed.Profit));
+    writeln('- Antibans Performed: ' + IntToStr(AntibansDone));
+    writeln('- Antibans Performed Per Hour: ' + IntToStr(floor(NumPerHour(AntibansDone))));
+    writeln('- Breaks Performed: ' + IntToStr(BreaksDone));
+    writeln('- Total Time Breaking: ' + IntToStr(TimeBreaking));
+    writeln('---------------------------------------');
+    writeln(' ');
+  end else
+  begin
+    writeln(' ');
+    writeln('------------ Ares Assistant -----------');
+    writeln('- Time Running: ' + timerunning);
+    writeln('- Number of Trips(per hour): ' + inttostr(TotalLoadsDone) + '(' + inttostr(floor(NumPerHour(TotalLoadsDone))) + ')');
+    writeln('- Experience Gained(per hour): ' + FloatToStr(exp) + '(' + inttostr(floor(NumPerHour(exp))) + ')');
+    writeln('- Logs Casted(per hour): ' + IntToStr(LogUsed.Casts) + '(' + inttostr(floor(NumPerHour(LogUsed.Casts))) + ')');
+    writeln('- Profit made(Per hour): ' + intToStr(profit) + '(' + inttostr(floor(NumPerHour(profit))) + ')');
+    writeln('- Breaks Performed: ' + IntToStr(BreaksDone));
+   writeln('---------------------------------------');
+   writeln(' ');
+  end;
+end;
+
+var
+  i : integer;
+  tpa : TPointArray;
+begin
+  DeclarePlayers;
+  SetupSRL;
+  MouseSpeed := 13;
+  SetUpLogRecord;
+  activateclient;
+  if not loggedin then loginplayer;
+  SetAngle(true);
+  writeln(LogUsed);
+  SetLength(IA, 29);
+  repeat
+    repeat
+      if not Bank then break;
+      if not CastPlanks then break;
+    until LastTrip;
+    NPlayer;
+  until allplayersinactive;
+  CastPlanks;
+  PrintProgress;
+  {tpa := GetClosestLogs
+  for i:= 0 to high(tpa) do
+  begin
+    mmouse(tpa[i].x, tpa[i].y, 0, 0)
+    wait(1000 + random(500));
+  end;}
+end.

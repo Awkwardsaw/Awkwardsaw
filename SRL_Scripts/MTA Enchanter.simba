@@ -1,0 +1,508 @@
+program Untitled;
+{$DEFINE SMART}
+{$I SRL/SRL.scar}
+{$i sps/sps.simba}
+{$I SRL/SRL/skill/magic.simba}
+const
+  StatsUser = ''; //Optional: SRL Stats username. DO NOT use runescape or SRL forums username
+  StatsPass = ''; //Optional: SRL Stats password. DO NOT use runescape or SRL forums password
+
+  MaxMouse = 17; //Maximum mouse speed.
+  MinMouse = 14; //Minimum mouse speed.
+
+  DetailedProggy = false; //True = detail progress report, false = standard
+  DetailedDebug = true; //True = detail debugging, false = no debugging
+
+  ChanceForAntiban = 600; //chance to do antiban while smelting.
+
+  TakeBreaks = true; //Do you want to take breaks?
+
+  LoadsTillBreak = 12; //Loads to do until break, leave zero if it doesn't matter or not breaking
+  RLoads = 5; //Plus random loads for break
+
+  TimeTillBreak = 60; //Minuts until break, leave zero if it doesn't matter or not breaking
+  RTime = 20; //Plus random minuts for break
+
+  TimeToBreak = 5; //minuts to break
+  RBreak = 5; //Plus random minuts to break for
+
+procedure DeclarePlayers;
+begin
+  //Disguise('Windows Live Messenger');
+
+  HowManyPlayers:= 1;
+  CurrentPlayer:= 0;
+  NumberOfPlayers(HowManyPlayers);
+
+  Smart_Server := 48;
+  Smart_Members := false;
+  Smart_Signed := true;
+  Smart_SuperDetail := False;
+
+  with Players[0] do
+  begin
+    Name := ''; // Username.
+    Pass := ''; // Password.
+    Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+    Pin  := '';
+    Active := True;
+    Strings[0] := '6';//spell number. Example: Saphire is 1, onyx is 6
+  end;
+end;
+
+
+const
+  Priority_High = 1;
+  Priority_Low = 0;
+
+  CylinderID = 0;
+  PentID = 1;
+  CubeID = 2;
+  IcoID = 3;
+
+  GridQI = 1;
+  GridQII = 2;
+  GridQIII = 3;
+  GridQIV = 4;
+
+var
+  //StartingPoints, CurrentPoints : Integer;
+  //Casts, TotalExp, TimesBreaked : Integer;
+  totalCosmics : integer;
+  SPSAreas : TBoxArray;
+  SpellCoords : TBox;
+
+procedure A_Debug(text: string; priority : integer);
+begin
+  if priority = 0 then
+    if not DetailedDebug then
+      exit;
+    writeln('|| [' + thetime + '] ' + players[currentplayer].nick + ' || ' + text);
+end;
+
+function NumPerHour(i : extended) : extended;
+begin
+  result := (3600 * i) / (1 + ((GetTimeRunning) / 1000));
+end;
+
+Function DistPoint(tp1, tp2 : TPoint) : integer;
+begin
+  result := Distance(tp1.x, tp1.y, tp2.x, tp2.y);
+end;
+
+Function GetPizzazPoints : integer;
+var
+  SPoints : String;
+begin
+  SPoints := GetTextAtEx(457, 47, 50, StatChars, false, false, 0, 10, 26316, 5, false, tr_Digits);
+  result := StrToIntDef(Trim(SPoints), -1);
+end;
+
+function GetBonusTPA : integer;
+var
+  ColArr : TIntegerArray;
+  i : integer;
+  tpa : TPointArray;
+begin
+  setlength(ColArr, 4);
+  result := -1;
+  ColArr[CylinderID] := 1342481;  //Chose to do it longways for better reading
+  ColArr[PentID] := 1714108;
+  ColArr[CubeID] := 2012884;
+  ColArr[IcoID] := 12802134;
+  ColorToleranceSpeed(2);
+  for i := 0 to 3 do
+    if FindColorsTolerance(tpa, Colarr[i], 453, 274, 500, 323, 4) then
+    begin
+      result := i;
+      writeln('Bonus Shape Result: ' + inttostr(result));
+      break;
+    end;
+end;
+
+function InArena : Boolean;
+begin
+  result := GetBonusTPA >= 0;
+  if not result then a_debug('Not in arena', Priority_Low);
+end;
+
+function FindCenterTPA : TPoint;
+var
+  TPA : TPointArray;
+  atpa : T2dPointArray;
+begin
+  SetColorToleranceSpeed(3);
+  if not FindColorsTolerance(TPA, 9342865, mmx1, mmy1, mmx2, mmy2, 4) then
+   begin
+     result := point(-100, -100);
+     exit;
+   end;
+  atpa := TPAtoATPAEx(TPA, 18, 19);
+  if length(atpa) < 0 then
+  begin
+    a_debug('Cannot find center tpa', Priority_High);
+    result := point(-100, -100);
+    exit;
+  end;
+  SortATPASize(atpa, true);
+  result := MiddleTPA(atpa[0]);
+end;
+
+(*
+R_WindPath
+~~~~~~~~~~
+
+.. code-block:: pascal
+
+    function R_WindPath(xs, ys, xe, ye, gravity, wind, minWait, maxWait, maxStep, targetArea: extended): TPointArray;
+
+Generates a blind path of points!
+
+.. note::
+
+  by JuKKa
+
+*)
+function R_WindPath(xs, ys, xe, ye, gravity, wind, minWait, maxWait, maxStep, targetArea: extended): TPointArray;
+var
+  veloX, veloY, windX, windY, veloMag, dist, randomDist, lastDist, step: extended;
+  lastX, lastY: integer;
+  sqrt2, sqrt3, sqrt5: extended;
+begin
+  sqrt2:= sqrt(2);
+  sqrt3:= sqrt(3);
+  sqrt5:= sqrt(5);
+  while hypot(xs - xe, ys - ye) > 1 do
+  begin
+    dist:= hypot(xs - xe, ys - ye);
+    wind:= minE(wind, dist);
+    if dist >= targetArea then
+    begin
+      windX:= windX / sqrt3 + (random(round(wind) * 2 + 1) - wind) / sqrt5;
+      windY:= windY / sqrt3 + (random(round(wind) * 2 + 1) - wind) / sqrt5;
+    end else
+    begin
+      windX:= windX / sqrt2;
+      windY:= windY / sqrt2;
+      if (maxStep < 3) then
+      begin
+        maxStep:= random(3) + 3.0;
+      end else
+      begin
+        maxStep:= maxStep / sqrt5;
+      end;
+    end;
+    veloX:= veloX + windX;
+    veloY:= veloY + windY;
+    veloX:= veloX + gravity * (xe - xs) / dist;
+    veloY:= veloY + gravity * (ye - ys) / dist;
+    if hypot(veloX, veloY) > maxStep then
+    begin
+      randomDist:= maxStep / 2.0 + random(round(maxStep) / 2);
+      veloMag:= sqrt(veloX * veloX + veloY * veloY);
+      veloX:= (veloX / veloMag) * randomDist;
+      veloY:= (veloY / veloMag) * randomDist;
+    end;
+    lastX:= Round(xs);
+    lastY:= Round(ys);
+    xs:= xs + veloX;
+    ys:= ys + veloY;
+    SetArrayLength(Result, GetArrayLength(Result) + 1);
+    Result[ High(Result) ] := Point(Round(xs), Round(ys));
+    step:= hypot(xs - lastX, ys - lastY);
+    lastdist:= dist;
+  end;
+end;
+
+// Walks to position. If walking paths, please use WalkPath.
+function SPS_WalkToPosEx(P: TPoint): boolean;
+var
+  MM: TPoint;
+begin
+  if not LoggedIn then Exit;
+  MM := SPS_PosToMM(P);
+
+  if (MM.X > 0) then
+  begin
+    Mouse(MM.X, MM.Y, 0, 0, True);
+    if WaitFunc(@IsMoving, 1, 1500 + random(500)) then //reduced wait time
+      while IsMoving do
+        Flag;
+    Result := True;
+  end;
+end;
+
+
+function R_GetWindPath(T: TPoint): TPointArray; //returns the wind path
+var
+  M : TPoint;
+begin
+  M := SPS_GetMyPos;
+  result := R_WindPath(M.x, M.y, T.X, T.Y, 5.0, 2.5, 0.0, 0.0, 4.5, 2.5);
+end;
+
+function A_WalkPath(point : TPoint) : Boolean;
+var
+  i, c : Integer;
+  tp, ntp : TPoint;
+  Path : TPointArray;
+begin
+  path := R_GetWindPath(point);
+  for i := 0 to high(path) do
+  begin
+    tp := SPS_PosToMM(path[i]);
+    if i < high(path) then
+    begin
+      ntp := SPS_PosToMM(path[i + 1]);
+      if rs_OnMinimap(ntp.x, ntp.y) then
+        continue;
+    end;
+    if not rs_OnMinimap(tp.x, tp.y) then
+    begin
+      a_debug('tile not on map: ' + inttostr(i), priority_high);
+      continue;
+    end;
+    mouse(tp.x, tp.y, 5, 5, true);
+    if i < high(path) then
+    begin
+      ntp := SPS_PosToMM(path[i + 1]);
+      while not rs_OnMinimap(ntp.x, ntp.y) do
+      begin
+        ntp := SPS_PosToMM(path[i + 1]);
+        wait(100 + random(50));
+        findnormalrandoms;
+        inc(c);
+        if c > 300 then
+        begin
+          result := false;
+          exit;
+        end;
+        if not ismoving then break;
+      end;
+    end else
+      flag;
+    end;
+  result := true;
+  WaitFunc(@flag, 50, 6000);
+end;
+
+Function Relocate(Whereto : TPoint) : Boolean;
+var
+  CurrPos, center : TPoint;
+begin
+  result := false;
+  CurrPos := SPS_GetMyPos;
+
+  if DistPoint(CurrPos, Whereto) < 5 then
+  begin
+    result := true;
+    exit;
+  end;
+
+  if SPS_PosOnMM(Whereto) then
+    if not SPS_WalkToPos(Whereto) then
+    begin
+      a_debug('Failed to walk to position: ' + tostr(Whereto), Priority_High);
+      exit;
+    end;
+
+  if not A_WalkPath(WhereTo) then
+  begin
+    A_Debug('Failed to wind walk, attempting to walk to center and retry', Priority_High);
+
+    center := FindCenterTPA;
+    if not center.x > -1 then
+    begin
+      a_debug('Cannot find center', Priority_High);
+      exit;
+    end;
+
+    mouse(center.x, center.y, 3, 3, true);
+    flag;
+    wait(200 + random(200));
+
+    if not A_WalkPath(Whereto) then
+    begin
+      a_debug('Cannot get to position', Priority_High);
+      exit;
+    end;
+  end;
+
+  result := true;
+end;
+
+Function RandomPointInBox(box : TBox) : TPoint;
+begin
+  Result.X := RandomRange(box.X1, box.X2);
+  Result.Y := RandomRange(box.Y1, box.Y2);
+end;
+
+Function WalkToBonus : Boolean;
+var
+  BonusItem : integer;
+  TempSPSCoord, MyPos : TPoint;
+begin
+  BonusItem := GetBonusTPA;
+
+  TempSPSCoord := RandomPointInBox(SPSAreas[BonusItem])
+
+  if not Relocate(TempSPSCoord) then
+  begin
+    a_debug('Failed to walk to bonus item: ' + inttostr(BonusItem), Priority_High);
+    exit;
+  end;
+
+  MyPos := SPS_GetMyPos;
+  result := PointInBox(MyPos, SPSAreas[BonusItem]);
+
+  if not result then
+    a_debug('Failed to walk to bonus item, result false', Priority_High);
+end;
+
+function A_FindObj(color, tol, count : integer; uptext : string; left : boolean): Boolean;
+var
+  X, Y, A, M, curCTS: Integer;
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+
+begin
+  Result := False;
+  if not LoggedIn then exit;
+  curCTS := GetColorToleranceSpeed;
+    ColorToleranceSpeed(2);
+    if not FindColorsSpiralTolerance(MSCX, MSCY, TPA, Color, MSX1, MSY1, MSX2, MSY2, tol) then
+    begin
+      ColorToleranceSpeed(1);
+      a_debug('Cannot find object', Priority_High);
+      exit;
+    end;
+    ColorToleranceSpeed(1);
+    ATPA := TPAtoATPAEx(TPA, 10, 10);
+    M := High(ATPA);
+    for A := 0 to M do
+    begin
+      if Length(ATPA[A]) < count then
+        continue;
+      if MiddleTPAEx(ATPA[A], X, Y) then
+      begin
+        MMouse(X, Y, 6, 6);
+        Wait(100 + Random(50));
+        if WaitUptext(uptext, 100) then
+        begin
+          GetMousePos(X, Y);
+          Mouse(X, Y, 0, 0, left);
+          Result := True;
+          ColorToleranceSpeed(curCTS);
+          Exit;
+        end;
+      end;
+    end;
+  ColorToleranceSpeed(curCTS);
+end;
+
+Function EnterArena : boolean;
+var
+  x, y : integer;
+begin
+  if InArena then
+  begin
+    result := true;
+    exit;
+  end;
+
+  if not A_FindObj(10068126, 5, 15, 'anters Tele', true) then
+  begin
+    if not FindSymbol(x, y, 'minigame') then
+    begin
+      A_Debug('Cannot enter arena. failed to find minigame symbol', Priority_High);
+      exit;
+    end;
+    mouse(x, y, 4, 4, true);
+    flag;
+    wait(300 + random(500));
+    if not A_FindObj(10068126, 5, 15, 'anters Tele', true) then
+    begin
+      A_Debug('Cannot enter arena. failed to find teleporter', Priority_High);
+      exit;
+    end;
+  end;
+
+
+  result := WaitFunc(@InArena, 50, 25000);
+
+  if not result then
+    A_Debug('Cannot enter arena. Timed out', Priority_High);
+end;
+
+Function SetUpPlayer : boolean;
+var
+  hat, x, y: integer;
+begin
+  Hat := DTMFromString('78DA632C676660B0646440058C482490AE02A' +
+       'A3127A0A61BA8C68E809A7EA01A37026ADA816AFC09A8A901AAF1' +
+       '22A0A611A8C69508F710B00B00EA720678');
+  if not InArena then
+  begin
+    GameTab(tab_Equip);
+    if not FindDTM(Hat, x, y, mix1, miy1, mix2, miy2) then
+    begin
+      GameTab(tab_Inv);
+      if not FindDTM(Hat, x, y, mix1, miy1, mix2, miy2) then
+      begin
+        A_Debug('Cannot find pizzaz hat', Priority_High);
+        FreeDTM(Hat);
+        exit;
+      end else
+        Mouse(x, y, 6, 6, true);
+    end;
+  end;
+  FreeDTM(Hat);
+
+  totalCosmics := RuneAmount('inv','cosmic');
+
+  gametab(tab_Magic);
+
+  SetSpellMode(false, true, true, true);
+
+  if not SpellAvailable(SpellCoords, 'lvl-' + players[0].strings[0] + ' enchant') then
+  begin
+    A_Debug('Spell is not available, make sure you are wielding correct staff', Priority_High);
+    A_Debug('Or  have correct/ enough runes', Priority_High);
+  end;
+end;
+
+Procedure LoadVariables;
+begin
+  DeclarePlayers;
+
+  SetupSRL;
+
+  SetLength(SPSAreas, 4);
+  SPSAreas[CylinderID] := PointToBox(point(300, 180), point(320, 200));  //boxes around the shapes
+  SPSAreas[PentID] := PointToBox(point(175, 300), point(195, 320));      //used for navigating
+  SPSAreas[CubeID] := PointToBox(point(180, 185), point(205, 205));      //also, using SPS Points
+  SPSAreas[IcoID] := PointToBox(point(305, 305), point(320, 320));
+
+  SPS_Setup(MTA,['0_0']);
+end;
+
+begin
+  LoadVariables;
+  //gametab(tab_Magic);
+  if not LoggedIn then LogInPlayer;
+
+  MakeCompass(0);
+  SetAngle(true);
+
+  SetUpPlayer;
+  EnterArena;
+
+  writeln(GetPizzazPoints);
+
+  WalkToBonus;
+end.
+
+{
+
+
+}

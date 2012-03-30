@@ -1,0 +1,1051 @@
+//OUTDATED REFLECTION DOESNT WORK
+
+program new;
+{.include srl/srl/misc/smart.scar}
+{.include srl/srl.scar}
+{.include srl/srl/misc/reports.scar}
+{.include reflection/reflection.simba}
+
+
+Const //script will choose a random mouse speed between:
+  MouseSpeedMin = 14;  //slowest possible speed
+  MouseSpeedMax = 20; //fastest possible speed
+
+  DoDebug = true; //debug into the debug box
+
+  canbreak = false; //do you want to break
+  breakchance = 120; //how much of a chance to break
+  breakfor = 12;// time in min, plus a random 5
+
+  dorest = true; //true = it will rest when under 10 run energy, to 100 energy
+
+  srl_id = '';   //srl stats id number
+  srl_pass = '';//srl stats password
+
+  ////////////////////do not touch below! hit run to start script!\\\\\\\\\\\\\\\
+Const
+  //id's
+  ID_INV_FLAX = 1779;
+  ID_INV_STRING = 1777;
+  ID_OBJ_FLAX = 2646;
+  ID_OBJ_WHEEL = 36970;
+
+  //array indexes
+  TILE_BANK = 0;
+  TILE_STAIR = 1;
+  TILE_WHEEL = 2;
+  TILE_FIELD = 3;
+
+  PATH_BANK = 0;
+  PATH_STAIR = 1;
+  PATH_WHEEL = 2;
+  PATH_FIELD = 3;
+
+  L_LOC_BANK = 0;
+  L_LOC_STAIR = 1;
+  L_LOC_WHEEL = 2;
+
+  DIR_UP = 1;
+  DIR_DOWN = 2;
+
+  L_WHEEL = 0;
+type
+  TProc = record
+    prog, Mainloop : Procedure;
+  end;
+
+Var
+  L_Tiles : Array of TTile;
+  LL_Tiles : Array of TTile; //lletya tiles
+  S_Paths : Array [0..3] of Array of TTile;
+  me : TMe;
+  loads, profit, levelsgained, statprofit, flaxprice, bowstringprice  : Integer;
+  Main : TProc;
+  city : string;
+  rflaxtile : TTileArray;
+
+var
+  Form : TFORM;
+  labels : array [0..1] of array of TLabel;
+  edits : array [0..1] of array of TEdit;
+  combos : Array of TCOMBOBOX;
+  buttons : Array [0..3] of TButton;
+  v : Tvariantarray;
+  c, action : integer;
+  start : Boolean;
+
+Const
+  column_one = 0;
+  column_two = 1;
+
+  b_save = 0;
+  b_load = 1;
+  b_run = 2;
+  b_stop = 3;
+
+  a_lumby = 0;
+  a_lletya = 1;
+  a_cammy_pick = 2;
+
+Function TehTime: String;
+Var
+  Hour, Mins, Sec, MSec: Word;
+Begin
+  DecodeTime(Now, Hour, Mins, Sec, MSec);
+  Result := (Padz(IntToStr(Hour), 2) + ':' + Padz(IntToStr(Mins), 2) + ':' + Padz(IntToStr(Sec), 2)+ ':' + Padz(IntToStr(MSec), 2));
+End;
+
+Procedure Debug(Txt: String);
+Begin
+  If doDebug Then
+    Writeln('[' + TehTime + '] ' + Txt);
+End;
+
+Procedure DeclarePlayers;
+Begin
+  HowManyPlayers := 1;
+  NumberOfPlayers(HowManyPlayers);
+  CurrentPlayer := 0;
+
+  Smart_Server := StrToIntDef(edits[column_two][2].text, 32);
+  Smart_Signed := StrToBoolDef(combos[1].text, true);
+
+  With Players[0] Do
+  Begin
+    Name := edits[0][1].text;
+    Pass := edits[0][2].text;
+    Nick := edits[0][3].text;
+    Active := True;
+    Integers[0] := StrToIntDef(edits[1][1].text, -1); //Flax to spin
+    Pin := edits[0][4].text;
+  End;
+  debug('declared players');
+End;
+
+Procedure SaveSettings;
+Begin
+  WriteINI('Player', 'Name', edits[0][1].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Pass', edits[0][2].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Nick', edits[0][3].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Pin' , edits[0][4].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Action' , combos[2].TEXT, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'World' , edits[column_two][2].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Signed' , combos[1].text, ScriptPath + 'Form_Players');
+  WriteINI('Player', 'Loads' , edits[1][1].text, ScriptPath + 'Form_Players');
+  Debug('saved form information');
+End;
+
+Procedure LoadSettings;
+begin
+  edits[0][1].text := ReadINI('Player', 'Name',  ScriptPath + 'Form_Players');
+  edits[0][2].text := ReadINI('Player', 'Pass',  ScriptPath + 'Form_Players');
+  edits[0][3].text := ReadINI('Player', 'Nick',  ScriptPath + 'Form_Players');
+  edits[0][4].text := ReadINI('Player', 'Pin',  ScriptPath + 'Form_Players');
+  combos[2].TEXT := ReadINI('Player', 'Action',  ScriptPath + 'Form_Players');
+  edits[1][2].text := ReadINI('Player', 'World',  ScriptPath + 'Form_Players');
+  combos[1].text := ReadINI('Player', 'Signed',  ScriptPath + 'Form_Players');
+  edits[1][1].text := ReadINI('Player', 'Loads',  ScriptPath + 'Form_Players');
+  Debug('loaded form information');
+end;
+
+Procedure RunScript;
+begin
+  Form.ModalResult := mrOK;
+  DeclarePlayers;
+  case combos[2].TEXT of
+    '[Lumby] Spin Flax' : action := a_lumby;
+    '[LLetya] Pick Flax': action := a_lletya;
+    '[Cammy] Pick Flax' : action := a_cammy_pick;
+  else
+    action := -1;
+  end;
+  start := true;
+  Debug('Script Started!');
+end;
+
+Procedure StopScript;
+begin
+  Form.ModalResult := mrOK;
+  Debug('script stopped');
+  terminatescript;
+end;
+
+procedure ButtonClick(Sender: TObject);
+begin
+  case sender of
+    buttons[b_save] : SaveSettings;
+    buttons[b_load] : LoadSettings;
+    buttons[b_run] : RunScript;
+    buttons[b_stop] : StopScript;
+  end;
+end;
+
+procedure paint(Sender: TObject);
+begin
+  DrawBitmap(c, form.CANVAS, 0, 0);
+  //freebitmap(c);
+end;
+
+procedure closeform(Sender: TObject);
+begin
+  freebitmap(c);
+end;
+
+procedure init;
+var
+  i, ii, iii : integer;
+  labelcaptions : array [0..1] of array of String;
+  combotexts : array[0..1] of array of String;
+  buttontexts : array of String;
+begin
+  labelcaptions[column_one] :=
+    ['Username:', 'Password:', 'Nick:', 'Pin:'];
+  labelcaptions[column_two] :=
+    ['Loads:', 'Server:', 'Signed:', 'Action:'];
+  combotexts[0] := ['True', 'False'];
+  combotexts[1] := ['[Lumby] Spin Flax', '[LLetya] Pick Flax', '[Cammy] Pick Flax'];
+  buttontexts := ['Save', 'Load', 'Start', 'Stop'];
+  Form := CreateForm;
+  with Form do
+  begin
+    Caption := 'Awkward Epic Flaxer';
+    SetBounds(100, 100, 360, 200);
+    BorderStyle := BSToolWindow;
+    form.ONpaint := @paint;
+   // ondestroy := @closeform;
+  end;
+  setarraylength(labels[column_one], 5);
+  for i := 1 to 4 do
+  begin
+    labels[column_one][i] := TLabel.Create(Form);
+    with labels[column_one][i] do
+    begin
+      Parent := Form;
+      caption := labelcaptions[column_one][i - 1];
+      left := 10;
+      top := i * 28;
+      font.color := clWhite;
+    end;
+  end;
+
+  setarraylength(labels[column_two], 5);
+  for i := 1 to 4 do
+  begin
+    labels[column_two][i] := TLabel.Create(Form);
+    with labels[column_two][i] do
+    begin
+      Parent := Form;
+      caption := labelcaptions[column_two][i - 1];
+      left := 200;
+      top := i * 28;
+      font.color := clWhite;
+    end;
+  end;
+
+  setarraylength(edits[column_one], 5);
+  for i := 1 to 4 do
+  begin
+    edits[column_one][i] := Tedit.Create(Form);
+    with edits[column_one][i] do
+    begin
+      Parent := Form;
+      Height := 30;
+      Width := 110;
+      left := 75;
+      top := i * 28;
+    end;
+  end;
+
+  setarraylength(edits[column_two], 3);
+  for i := 1 to 2 do
+  begin
+    edits[column_two][i] := Tedit.Create(Form);
+    with edits[column_two][i] do
+    begin
+      Parent := Form;
+      Height := 30;
+      Width := 110;
+      left := 250;
+      top := i * 28;
+    end;
+  end;
+
+  setarraylength(combos, 3);
+  for i := 1 to 2 do
+  begin
+    combos[i] := Tcombobox.Create(Form);
+    with combos[i] do
+    begin
+      Parent := Form;
+      Height := 30;
+      Width := 110;
+      left := 250;
+      top := 56 + i * 28;
+      if i = 1 then iii := 1 else iii := 2;
+      for II := 0 to iii do
+        Items.Add(ComboTexts[i - 1][ii]);
+    end;
+  end;
+
+  for I := 0 to 3 do
+  begin
+    Buttons[I] := TButton.Create(Form);
+    with Buttons[I] do
+    begin
+      Parent := Form;
+      height := 40;
+      width := 90;
+      left := i * 90;
+      top := 142;
+      Caption := buttontexts[i];
+      OnClick := @ButtonClick;
+    end;
+  end;
+  form.ShowModal;
+  form.Free;
+  Debug('Form initialized');
+end;
+
+procedure doform;
+begin
+  c := LoadBitmap(ScriptPath + 'backround.bmp');
+  ThreadSafeCall('init',v);
+  freebitmap(c);
+end;
+
+function getprice(wat : integer) : integer;
+var
+  s : string;
+begin
+  case wat of
+    0 : s := getpage('http://services.runescape.com/m=itemdb_rs/Flax/viewitem.ws?obj=1779');
+    1 : s := getpage('http://services.runescape.com/m=itemdb_rs/Bow_string/viewitem.ws?obj=1777');
+    else exit;
+  end;
+  s := between('<b>Market price:</b> ', #10, s);
+  result := strtointdef(s, -1);
+end;
+
+procedure l_prog;
+var
+  c, LPH : integer;
+begin
+  //cleardebug;
+  c := (1 + ((GetTimeRunning) / 1000));
+  LPH := (3600 * Loads) / c;
+ SRLProgressReport( ResultDebugBox,  'Awkward Flax Spinner', 'Awkwardsaw', '1.0',
+                           ['Loads', 'Loads per hour', 'EXP gained', 'EXP per hour', 'Time Running', 'Profit', 'Profit per hour' ],
+                           [inttostr(loads) + '/' + inttostr(Players[currentplayer].Integers[0]), LPH, Loads * 28 * 15, LPH * 28 * 15, MsToTime(GetTimeRunning, Time_Abbrev), (profit * loads * 28), (profit * lph * 28)]
+                          );
+end;
+
+procedure settiles;
+begin
+  L_Tiles := [tile(3208, 3219){bank}, tile(3205, 3208){stairs}, tile(3210, 3213){wheel}];
+
+  LL_Tiles := [tile(2352, 3163){bank},tile(0, 0){null}, tile(0, 0){null},  tile(2357, 3154){field}];
+
+  S_Paths[PATH_BANK] := [
+    Tile(2733, 3444), Tile(2727, 3455), Tile(2726, 3466),
+    Tile(2725, 3479), Tile(2726, 3492) ];
+
+  S_Paths[PATH_FIELD] := [
+    Tile(2726, 3485), Tile(2726, 3476), Tile(2727, 3464),
+    Tile(2729, 3454),  Tile(2733, 3444),  Tile(2742, 3444) ];
+  Debug('set up tiles');
+end;
+
+procedure antiban;
+begin
+  case random(60) of
+    0 : makecompass(randomrange(-720, 720));
+    1 : makecompass(randomrange(-360, 360));
+    2 : if random(3) = 0 then hoverskill(Skill_Crafting, false);
+    3 : gametab(tab_Friends);
+    4 : gametab(tab_Stats);
+    5 : setangle(RBool);
+  end;
+  setangle(true);
+  makecompass(0);
+  r_findrandoms;
+end;
+
+procedure dobreak;
+begin
+  if not canbreak then
+    exit;
+  if breakchance = 0 then
+  begin
+    Debug('breaking');
+    ExitToLobby;
+    wait(breakfor + random(5) * 60 + random(10) * 1000 + random(200));
+    LoginPlayer;
+    Debug('breaking is done');
+  end;
+end;
+
+function MeNearTile(tile : TTile; dist : Integer) : Boolean;
+begin
+  me := GetMe;
+  result := DistanceFrom(TileToPoint(tile)) <= dist;
+end;
+
+{*******************************************************************************
+Function R_OpenBankBoothex(Bank : String): Boolean;
+By: ss23 & TheGuyWhoGotOn, small tile addition change by awkwardsaw
+Description: Opens the bank using Bank Booth. edited by awkwardsaw for lletya useage
+*******************************************************************************}
+Function r_openbankex(Bank : String) : Boolean;
+var
+  Tiles: TPointArray;
+  P: TPoint;
+  Tries: Integer;
+begin
+  Result := R_BankScreen or R_PinScreen;
+  if Result then Exit;
+
+  case LowerCase(Bank) of
+  'lumbridge', 'lb':
+        Tiles := [Point(3208,3221)];
+  'seb', 'seers':
+        Tiles := [Point(2729,3494), Point(2728,3494), Point(2727,3494),
+                  Point(2724,3494), Point(2722,3494)];
+  'lletya', 'lly' :
+        Tiles := [Point(2352, 3166)];
+  end;
+  SortTPAFrom(Tiles, GetMyPos);
+  if (DistanceFrom(Tiles[0]) > 3) or not TileOnMS(Tiles[0], 10) then
+  begin
+    if not(TileOnMM(Tiles[0])) then
+    begin
+      SRL_Warn('R_OpenBankBooth', 'Could not find Bank Booth.', Warn_AllVersions);
+      Exit;
+    end;
+    WalkToTile(Tiles[0], 0, 0);
+    Wait(50);
+    R_Flag;
+    Wait(RandomRange(100, 200));
+  end;
+  if not(TileOnMS(Tiles[0], 10)) then
+  begin
+    SetAngle(True);
+    MakeCompass('n');
+    Wait(RandomRange(200, 400));
+    if not(TileOnMS(Tiles[0], 10)) then
+    begin
+      SRL_Warn('R_OpenBankBooth', 'Could get MS Point.', Warn_AllVersions);
+      Exit;
+    end;
+  end;
+
+  P := TileToMS(Tiles[0], 10);
+  MMouse(p.x - 5, p.y - 5, 11, 11);
+  Wait(RandomRange(200, 300));
+  if IsUpTextMultiCustom(['ank', 'ooth']) then
+  begin
+    GetMousePos(P.x, P.y);
+    Mouse(P.x, P.y, 0, 0, false);
+    Wait(RandomRange(80, 110));
+    P.x := 0;
+    if R_ChooseOptionMulti(['Use-quickly', 'Bank Banker']) then
+      repeat
+        R_Flag;
+        Wait(RandomRange(50, 90));
+        Inc(Tries);
+        if (Length(Players) > 0) then
+          if Players[CurrentPlayer].Pin <> '' then
+            Result := InPin(Players[CurrentPlayer].Pin);
+        Result := R_BankScreen or R_PinScreen;
+      until Result or (Tries > 40);
+  end;
+end;
+
+function L_Bank : Boolean;
+begin
+  Debug('starting to bank');
+  result := true;
+  while IsMoving do
+    wait(100 + random(100));
+  if (R_CountItem(ID_INV_FLAX) > 0) and (R_CountItem(ID_INV_STRING) = 0) then exit;
+  if not MeNearTile(L_Tiles[TILE_BANK], 2) then
+  begin
+    Debug('not close enough to bank, attempting to get closer');
+    me := GetMe;
+    if me.Height = 2 then
+      if not WalkToTile(L_Tiles[TILE_BANK], 1, 0) then
+      begin
+        Debug('cannot get to bank for somereason');
+        result := false;
+        exit;
+      end;
+  end;
+  if R_OpenBankex('lb') then
+  begin
+    Debug('opened bank');
+    R_DepositAll(true);
+    if not withdraw(0, 0, 28) then
+    begin
+      result := false;
+      Debug('some how messed up withdrawing');
+      exit;
+    end;
+    wait(1000 + random(500));
+  end;
+  CloseBank;
+  result := R_CountItem(ID_INV_FLAX) > 0;
+  Debug('finished banking. result : ' + booltostr(result));
+end;
+
+function atfloor(where : integer) : boolean;
+var
+  x, y : integer;
+begin
+  case where of
+    1 : result := (not findsymbol(x, y, 'bank')) or (CountDots('npc') > 3);
+    2 : result := (not findsymbol(x, y, 'quest')) or (not findsymbol(x, y, 'spin')) or (CountDots('npc') = 1);
+  end;
+end;
+
+
+function L_Use_Stairs(dir : Integer) : Boolean;
+var
+  tp : TPoint;
+  tempme : TMe;
+  c : Integer;
+begin
+  Debug('starting to use stairs');
+  me := GetMe;
+  tempme := me;
+  tp := TileToMS(L_Tiles[TILE_STAIR], dir);
+  symbolaccuracy := 0.5;
+  if dir = 2 then
+  begin
+    Debug('attempting to go down stairs');
+    mouse(tp.x, tp.y, 3, 3, true);
+    while atfloor(2) do
+    begin
+      if c = 50 then
+      begin
+        Debug('took to long to go down stairs');
+        exit;
+      end;
+      inc(C);
+      wait(50 + random(100));
+    end;
+  end else
+  begin
+    Debug('attempting to go up stairs');
+    mouse(tp.x, tp.y, 3, 3, false);
+    wait(200 + random(100));
+    if not r_chooseoption('up') then
+    begin
+      Debug('something is wrong going up the stairs, could not chooseoption');
+      exit;
+    end;
+    while atfloor(1) do
+    begin
+      if c = 50 then
+      begin
+        Debug('something messed up going up stairs, took to long');
+        exit;
+      end;
+      inc(c);
+      wait(50 + random(30));
+    end;
+  end;
+  result := true;
+  Debug('used stairs, result : ' + booltostr(result));
+end;
+
+function L_Go_To(where : integer) : Boolean;
+begin
+  Debug('walking somewhere');
+  case where of
+    L_LOC_BANK : result := WalkToTile(L_Tiles[TILE_BANK], 0, 2);
+    L_LOC_STAIR : result := WalkToTile(L_Tiles[TILE_STAIR], 1, 2);
+    L_LOC_WHEEL : result := WalkToTile(L_Tiles[TILE_WHEEL], 0, 2);
+  end;
+  while ismoving do
+    wait(50 + random(50));
+  Debug('walking to (' + inttostr(where) + ') is done. result :' + booltostr(result));
+end;
+
+function spin_interface_open : Boolean;
+var
+  i : integer;
+begin
+  for i := 0 to 30 do
+  begin
+    if (getcolor(178, 477) = 2070783) then
+        break;
+    wait(50 + random(50));
+  end;
+  result := i < 50;
+end;
+function L_Do_Spin : Boolean;
+var
+  tp, xy : TPoint;
+  i, t, a : integer;
+  goback : Boolean;
+begin
+  Debug('starting to spin');
+  repeat
+    goback := false;
+    t := 0;
+    if (R_CountItem(ID_INV_FLAX) = 0) then
+    begin
+      result := true;
+      Debug('no flax to spin with, exiting');
+      exit;
+    end;
+    if not MeNearTile(L_Tiles[TILE_WHEEL], 2) then
+      if not WalkToTile(L_Tiles[TILE_WHEEL], 0, 0) then
+      begin
+        Debug('cannot get close enough to tile, exiting');
+        exit;
+      end;
+      tp := TileToMS(tile(3209, 3212), 1);
+      if  tp.x = 0 then
+        exit;
+      Debug('attempting to open wheel interface');
+      mmouse( tp.x,  tp.y, 5, 5);
+      for i := 0 to 20 do
+      begin
+        wait(50 + random(50));
+        if r_isuptext('inning') then
+          break;
+      end;
+      if i = 20 then
+      begin
+        Debug('failed in opening debug interface');
+        exit;
+      end;
+   Debug('succecfully got into debug interface');
+   getmousepos( tp.x,  tp.y);
+   mouse( tp.x,  tp.y, 0, 0, true);
+   wait(100 + random(300));
+   if i = 30 then
+   begin
+     Debug('failed in opening debug interface 1');
+     exit;
+   end;
+   debug('testing to see if spin_interface_open works 1');
+   while not spin_interface_open do
+     wait(50 + random(50));
+   debug('if you see this, then it does :)');
+   mouse(163, 425, 15, 15, true);
+   wait(100 + random(400));
+   Debug('started to spin');
+   while R_CountItem(ID_INV_FLAX) > 0 do
+   begin
+     wait(1000 + random(2000));
+     inc(t);
+     antiban;
+     if LevelUp then
+     begin
+       Debug('leveled up! attempting to restart spinning');
+       inc(levelsgained);
+     end;
+     if t > 60 then
+     begin
+       goback := true;
+       break;
+       L_prog;
+     end;
+    if R_CountItem(ID_INV_FLAX) < randomrange(1, 12) then
+    begin
+      xy := TileToMM(L_Tiles[1]);
+      mmouse(xy.x, xy.y, 0, 0);
+    end;
+    end;
+    inc(a);
+    result := R_CountItem(ID_INV_FLAX) = 0;
+  until (not goback) or result or (a = 3);
+  Debug('spinning done. result: ' + booltostr(result));
+end;
+
+procedure main_terminate;
+begin
+  logout;
+  Debug('scrip somehow messed up, logging out and terminating');
+  main.prog();
+  terminatescript;
+end;
+
+Procedure L_Main;
+begin
+  if atfloor(2) then
+    if not L_Bank then main_terminate;
+  if atfloor(2) then
+    if not L_Go_To(l_LOC_STAIR) then main_terminate;
+  if atfloor(2) then
+    if not L_Use_Stairs(DIR_DOWN) then main_terminate;
+  if atfloor(1) then
+    if not L_Go_To(L_LOC_WHEEL) then main_terminate;
+  if atfloor(1) then
+    if not L_Do_Spin then main_terminate;
+  if atfloor(1) then
+    if not L_Go_To(L_LOC_STAIR) then main_terminate;
+  if atfloor(1) then
+    if not L_Use_Stairs(DIR_UP) then main_terminate;
+  if atfloor(2) then
+    if not L_Go_To(L_LOC_BANK) then main_terminate;
+  cleardebug;
+end;
+
+function PickingFlax_Bank(bank : String; Tile : TTile) : Boolean;
+begin
+  Debug('starting to bank');
+  result := true;
+  while IsMoving do
+    wait(100 + random(100));
+  if (R_CountItem(ID_INV_FLAX) = 0) then exit;
+  if not MeNearTile(tile, 1) then
+  begin
+    Debug('not close enough to bank, attempting to get closer');
+    if not WalkToTile(tile, 0, 0) then
+    begin
+      Debug('cannot get to bank for somereason');
+      result := false;
+      exit;
+    end;
+  end;
+  if R_OpenBankex(bank) then
+  begin
+    Debug('opened bank');
+    R_DepositAll(true);
+    wait(500 + random(500));
+  end else
+    debug('did not open bank: ' + bank);
+
+  result := R_CountItem(ID_INV_FLAX) = 0;
+  Debug('finished banking. result : ' + booltostr(result));
+end;
+
+function ClickObjByID(ID, objType, MD, height : Integer; uptext : String; left : Boolean):boolean;
+var
+  Obj : TRSObject;
+  tp : TPoint;
+  x, y, c : Integer;
+label
+  here;
+begin
+  Obj := GetObjectByID(ID, objType, MD);
+  tp := TileToMS(Obj.Tile, height);
+  mmouse(tp.x, tp.y, 3, 3);
+  wait(100 + random(200));
+  here:
+  if R_IsUpText(UpText) then
+  begin
+    getmousepos(x, y);
+    mouse(x, y, 0, 0, left);
+    result := true;
+  end else
+  begin
+    inc(c);
+    mmouse(tp.x, tp.y, 0, 0);
+    if c = 2 then exit;
+    goto here;
+  end;
+end;
+
+function  LL_GoTo(where : Integer) : boolean;
+begin
+  Debug('walking somewhere');
+  case where of
+    TILE_BANK : result := WalkToTile(LL_Tiles[TILE_BANK], 0, 0);
+    TILE_FIELD : result := WalkToTile(LL_Tiles[TILE_FIELD], 1, 0);
+  end;
+  Debug('walking to (' + inttostr(where) + ') is done. result :' + booltostr(result));
+end;
+
+function Flax_GetBackToTile(tile : TTile) : boolean;
+begin
+  if not MeNearTile(Tile, 3) then
+  begin
+    R_FindRandoms;
+    if not WalkToTile(Tile, 1, 0) then
+    begin
+      debug('Picking flax messed up. not at field');
+      exit;
+    end;
+  end;
+  result := true;
+end;
+
+function PickFlax(tile : TTile) : Boolean;
+var
+  c, x, y : Integer;
+  me : TMe;
+  flaxobj : TRSObject;
+  tp : TPoint;
+  //temptile : TTile;
+begin
+  debug('Picking flax');
+  if not Flax_GetBackToTile(tile) then
+  begin
+    debug('not at field?');
+    exit;
+  end;
+  repeat
+    r_findrandoms;
+    me := getme;
+    flaxobj := GetObjectAt(me.Tile, OBJECT_TYPE_INTERACTABLE);
+
+    if flaxobj.ID = ID_OBJ_FLAX then
+    begin
+      tp := TileToMS(flaxobj.Tile, 0);
+      mmouse(tp.x, tp.y, 2, 2);
+      if r_isuptext('ick') then
+      begin
+        getmousepos(x, y);
+        mouse(x, y, 0, 0, true);
+      end;
+    end else
+
+    if r_isuptext('ick') then
+    begin
+      getmousepos(x, y);
+      mouse(x, y, 0, 0, true);
+    end else
+      if not ClickObjByID(ID_OBJ_FLAX, OBJECT_TYPE_INTERACTABLE, 6, 0, 'ick', true) then
+      begin
+        if not Flax_GetBackToTile(tile) then
+        begin
+          debug('Picking flax failed while picking flax, not at field?');
+          exit;
+        end;
+      end;
+
+    while ismoving do
+    begin
+      R_FindRandoms;
+      wait(10 + random(50));
+    end;
+
+    wait(random(300));
+    inc(c);
+    incex(statprofit, flaxprice);
+  until (c = 50) or r_invfull;
+  result := true;
+  debug('done picking flax');
+end;
+
+procedure Pickingflax_Prog;
+var
+  lph : integer;
+begin
+  c := (1 + ((GetTimeRunning) / 1000));
+  LPH := (3600 * Loads) / c;
+  SRLProgressReport( ResultDebugBox,  'Awkward ' + city + ' Flaxer', 'Awkwardsaw', '1.0',
+                           ['Loads', 'Loads per hour', 'Time Running', 'Profit', 'Profit per hour' ],
+                           [inttostr(loads) + '/' + inttostr(Players[currentplayer].Integers[0]), LPH, MsToTime(GetTimeRunning, Time_Abbrev), statprofit, lph * statprofit]
+                          );
+end;
+
+Procedure LL_Main;
+begin
+  r_findrandoms;
+  if not PickingFlax_Bank('lly', LL_Tiles[TILE_BANK]) then main_terminate;
+  r_findrandoms;
+  if not LL_GoTo(TILE_FIELD) then main_terminate;
+  r_findrandoms;
+  if not PickFlax(LL_Tiles[TILE_FIELD]) then main_terminate;
+  r_findrandoms;
+  if not LL_GoTo(TILE_BANK) then main_terminate;
+  r_findrandoms;
+end;
+
+procedure walkantiban;
+begin
+  case random(50) of
+    0 : makecompass(random(360));
+    1 : makecompass(random(-360));
+    2 : makecompass(random(-720));
+    3 : makecompass(random(720));
+    4 : gametab(randomrange(tab_Combat, tab_Notes));
+  end;
+end;
+
+procedure checkrest;
+begin
+  if not dorest then exit;
+  if R_GetMMLevels('run') <= 20 then
+    R_Rest(100);
+end;
+
+function S_GetFlaxSpot : TTile;
+var
+  i : integer;
+  tp : TPoint;
+begin
+  result := rflaxtile[0];
+  for i := 0 to high(rflaxtile) do
+  begin
+    writeln(i);
+    tp := tiletomm(rflaxtile[i]);
+    if high(GetMiniMapDotsIn('white', tp.x - 8,  tp.y - 8,  tp.x + 8,  tp.y + 8)) >= 1 then
+      continue
+    else
+    begin
+      result := rflaxtile[i];
+      exit;
+    end;
+  end;
+end;
+
+function S_WalkPath(path : TTileArray) : Boolean;
+var
+  i, c : Integer;
+  tp, ntp : TPoint;
+begin
+  checkrest;
+  for i := 0 to high(path) do
+  begin
+    tp := TileToMM(path[i]);
+    if i < high(path) then
+    begin
+      ntp := TileToMM(path[i + 1]);
+      if rs_OnMinimap(ntp.x, ntp.y) then
+        continue;
+    end;
+    if not rs_OnMinimap(tp.x, tp.y) then
+    begin
+      debug('tile not on map: ' + inttostr(i));
+      continue;
+    end;
+    mouse(tp.x, tp.y, 5, 5, true);
+    if i < high(path) then
+    begin
+      ntp := TileToMM(path[i + 1]);
+      while not rs_OnMinimap(ntp.x, ntp.y) do
+      begin
+        ntp := TileToMM(path[i + 1]);
+        walkantiban;
+        wait(100 + random(50));
+        r_findrandoms;
+        inc(c);
+        if c > 300 then
+        begin
+          result := false;
+          exit;
+        end;
+        if not ismoving then continue;
+      end;
+    end else
+      r_flag;
+    end;
+  result := true;
+end;
+
+Function S_GoTo(where : integer) : boolean;
+begin
+  debug('walking: ' + inttostr(where));
+  case where of
+    PATH_BANK : result := S_WalkPath(S_Paths[PATH_BANK]);
+    PATH_FIELD : result := S_WalkPath(S_Paths[PATH_FIELD]);
+  end;
+  if not result then
+    debug('failed to walk')
+  else
+    debug('walking to: ' + inttostr(where) + ' done');
+end;
+
+function s_getlocation(dist : Integer) : integer;
+begin
+  result := -1;
+  if MeNearTile(Tile(2726, 3492), dist) then
+    result := 0;
+  if MeNearTile(Tile(2742, 3444), dist) then
+    result := 1;
+end;
+
+Procedure S_Main;
+var
+  currflaxtile : TTile;
+begin
+  r_findrandoms;
+  rflaxtile := [Tile(2742, 3447), tile(2739, 3440), tile(2745, 3441)];
+  if s_getlocation(2) = 0 then
+  begin
+    writeln(0);
+    if not PickingFlax_Bank('seb', tile(2727, 3492)) then main_terminate;
+  end;
+  r_findrandoms;
+  if s_getlocation(9) = 0 then
+    if not S_GoTo(PATH_FIELD) then main_terminate;
+  r_findrandoms;
+  currflaxtile := S_GetFlaxSpot;
+  writeln('Picking flax at: ' + ToStr(currflaxtile));
+  if s_getlocation(19) = 1 then
+    if not pickflax(currflaxtile) then main_terminate;
+  r_findrandoms;
+  if s_getlocation(12) = 1 then
+    if not S_GoTo(PATH_BANK) then main_terminate;
+end;
+
+procedure scriptterminate;
+begin
+  main.prog();
+end;
+
+procedure setloop;
+begin
+  flaxprice := getprice(0);
+  bowstringprice := getprice(1);
+  case action of
+    a_lumby :
+    begin
+      main.mainloop := @L_Main;
+      main.prog := @l_prog;
+      profit :=  bowstringprice - flaxprice;
+      Debug('Script using Lumby Flax Spinner main loop');
+    end;
+    a_lletya :
+    begin
+      main.mainloop := @LL_Main;
+      main.prog := @Pickingflax_Prog;
+      city := 'Lletya';
+      profit := flaxprice;
+      Debug('Script using lletya flax picker main loop');
+    end;
+    a_cammy_pick :
+    begin
+      main.mainloop := @S_Main;
+      main.prog := @Pickingflax_Prog;
+      city := 'seers';
+      profit := flaxprice;
+      Debug('Script using Seers flax picker main loop');
+    end;
+    -1 :
+    begin
+      debug('invalid Action set in form. please reset it :)');
+      terminatescript;
+    end;
+  end;
+end;
+
+begin
+  doform;
+  setloop;
+  setupsrl;
+  mousespeed := randomrange(MouseSpeedMin, MouseSpeedMax);
+  setupreflectionex(true);
+  if not loggedin then loginplayer;
+  setangle(true);
+  setrun(true);
+  settiles;
+  repeat
+    if loads mod randomrange(7, 12) = 0 then
+    begin
+      mousespeed := randomrange(MouseSpeedMin, MouseSpeedMax);
+      Debug('Setting new mouse speed. mousespeed:' + inttostr(mousespeed));
+    end;
+    main.mainloop();
+    dobreak;
+    inc(loads);
+    main.prog();
+  until loads >= Players[currentplayer].Integers[0];
+  Debug('Script is finished! finished all required loads');
+  logout;
+end.

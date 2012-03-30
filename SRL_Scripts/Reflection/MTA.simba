@@ -1,0 +1,2548 @@
+program Untitled;
+{$DEFINE SMART}
+{.include SRL/SRL.scar}
+{.include SRL/SRL/skill/magic.scar}
+{.include SRL/SRL/misc/paintsmart.scar}
+{.include SRL/SRL/misc/stats.simba}
+{.include Reflection/Reflection.simba}
+
+const
+  StatsUserId = '';   //please use SRL Stats :)
+  StatsUserPass = '';
+
+  {'lvl-1 enchant', 'lvl-2 enchant', 'lvl-3 enchant', 'lvl-4 enchant', 'lvl-5 enchant' ,'lvl-6 enchant';
+  'high level alchemy', 'low level alchemy';
+  'bones to bananas', 'bones to peaches';
+  'telekinetic grab';
+
+  }
+
+procedure DeclarePlayers;
+begin
+  //Disguise('Windows Live Messenger');
+
+  HowManyPlayers:= 1;
+  CurrentPlayer:= 0;
+  NumberOfPlayers(HowManyPlayers);
+
+  Smart_Server := 132;
+  Smart_Members := false;
+  Smart_Signed := true;
+  Smart_SuperDetail := False;
+           writeln('calling names');
+  Players[0].Name := ''; // Username.
+  Players[0].Pass := ''; // Password.
+  Players[0].Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+  Players[0].Pin  := '';
+  Players[0].Active := True;
+  Players[0].Strings[0]  := 'alchemy';// arena: Maze, Enchant, Graveyard, Alchemy
+  Players[0].Strings[1]  := '';// spell: Read Above. '' = auto (highest spell)
+  Players[0].Integers[0]  := 500; //points to end up with. use a high number if you want to use all of your runes
+end;
+
+procedure A_Debug(text: string);
+begin
+    writeln('[' + thetime + '] ' + players[currentplayer].nick + ' ' + text);
+end;
+
+type
+  TMaze = record
+    dist : integer;
+    wallcount : integer;
+    moves : integer;
+end;
+
+type
+  TMainLoop = record
+    MainLoop : Function : boolean;
+    exp : extended;
+    points : integer;
+    index : string;
+    spell : string;
+    spelldtm : integer;
+end;
+
+
+var
+  Maze : Array [1..11] of TMaze;
+  Startlevel, StartPoints : Integer;
+  mazep, enchantp, gravep, alchemyp : integer;
+  spellused : String;
+  Main : TMainLoop;
+  exp : extended;
+  Arenas : TStringArray;
+  currentarena : integer;
+{const
+  r_air = 'air';
+  r_earth = 'earth';
+  r_water = 'water';
+  r_fire = 'fire';
+  r_nature = 'nature';
+  r_law = 'law';
+  r_cosmic = 'cosmic';}
+
+
+const
+  arena_maze = 0;
+  arena_enchantment = 1;
+  arena_graveyard = 2;
+  arena_alchemy = 3;
+
+  portal_id = 10782;
+  guardian_id = 6888;
+  wall_id = 10755;
+  maze_enter = 10778;
+
+  enchant_enter = 10779;
+  enchant_exit = 10782;
+  enchant_hole = 10803;
+  cube = 10799;
+  icosahedron = 10801;
+  pentamid = 10802;
+  cylinder = 10800;
+  dragonstone = 6903;
+  pent_inv = 6901;
+  cylinder_inv = 6898;
+  cube_inv = 6899;
+  ico_inv = 6900;
+
+  graveyard_enter = 10781;
+  graveyard_exit = 10782;
+  grave_deposit = 10735;
+  t4_stack = 10728;//obj id
+  t3_stack = 10727;
+  t2_stack = 10726;
+  t1_stack = 10725;
+  t4_bones = 6907; //inv id
+  t3_bones = 6906;
+  t2_bones = 6904;
+  t1_bones = 6905;
+
+  alchemy_enter = 10780;
+  alchemt_exit = 10782;
+  alchemy_deposit = 10734;
+  boots_inv = 6893;
+  shield_inv = 6894;
+  helm_inv = 6895;
+  emerald_inv = 6896;
+  sword_inv = 6897;
+
+{Aliases because of ref2 annoyances}
+function GetObjectByIDEx(IDs: TIntegerArray; ObjType, MaxDist: Integer): TRSObject;
+begin
+  result := R_GetObjectEx(IDs, ObjType, MaxDist);
+end;
+
+function TileToMS(TheTile: TTile; height : integer)  : TPoint;
+begin
+  result := R_TileToMS(TheTile, height);
+end;
+
+function TileOnMS(TheTile: TTile; Height : Integer) : boolean;
+begin
+  result := R_TileOnMS(TheTile, Height);
+end;
+
+function GetObjectByID(ID, ObjType, MaxDist: Integer): TRSObject;
+begin
+  result := R_GetObject(ID, ObjType, MaxDist);
+end;
+
+function GetObjectsByID(ID, ObjType, MaxDist: Integer): TRSObjectArray;
+begin
+  result := R_GetObjects(ID, ObjType, MaxDist);
+end;
+
+function GetItemsNear(i : integer) : TGroundItemArray;
+begin
+  result := R_GetAllGroundItems(i);
+end;
+
+{End of aliases}
+
+Procedure AkwardAntiBan;
+begin
+ case random(100) of
+  0,1,9: Gametab(randomrange(tab_Combat, tab_Notes));
+  2,5,8: wait(1000 + random(3000));
+  3,6,7: begin
+      MakeCompass(IntToStr(random(180)));
+      MakeCompass(IntToStr(random(1)));
+     end;
+  4: HoverSkill('magic', false);
+ end;
+end;
+
+  Procedure PrintOnSmart(TP: TStringArray; Placement: TPoint; Colour: integer);
+  var
+    mx, my, Pic, I, B, H, TPH, Numb: Integer;
+    TTP: TPointArray;
+    Canvas: TCanvas;
+  begin
+    SmartSetDebug(True);
+    GetClientDimensions(mx, my);
+    Pic := BitmapFromString(mx, my, '');
+    TPH := High(TP);
+    for I := 0 to TPH do
+    begin
+      TTP := LoadTextTPA(TP[i], SmallChars, H);
+      for B := 0 to High(TTP) do
+      begin
+        Numb := ((I + 1) * 13);
+        FastSetPixel(Pic, TTP[b].x + 1, TTP[b].y + Numb + 1,131072);
+        FastSetPixel(Pic, TTP[b].x, TTP[b].y + Numb, Colour);
+      end;
+    end;
+    Canvas := TCANVAS.Create;
+    Canvas.Handle := SmartGetDebugDC;
+    DrawBitmap(Pic, Canvas, Placement.x, Placement.y);
+    FreeBitmap(Pic);
+  end;
+
+function FindHat: boolean; //equips pizazz hat if in inventory
+var hat, x, y: integer;
+begin
+ gametab(tab_inv);
+ wait(500+ random(500));
+ Hat := DTMFromString('78DA632C676660B0646440058C482490AE02A' +
+       'A3127A0A61BA8C68E809A7EA01A37026ADA816AFC09A8A901AAF1' +
+       '22A0A611A8C69508F710B00B00EA720678');
+ result:= FindDTM(Hat, x, y, mix1, miy1, mix2, miy2);
+ mouse(x, y, 3, 3, true);
+ freedtm(Hat);
+end;
+
+function getdist : integer; //returns distance between exit portal and guardian in maze
+var
+  portal : TRSObject;
+  guardian : TGroundItemarray;
+begin
+  portal := GetObjectByID(portal_id, 0, 5);
+  guardian := GetItemsNear(32);
+  if Length(guardian) > 0 then
+    result := Distance(portal.Tile.x, portal.Tile.y,
+                       guardian[0].Tile.x, guardian[0].Tile.y);
+end;
+
+function getwalls : integer; //returns amount of walls in maze, determines which maze
+var
+  walls : TRSObjectArray;
+begin
+  writeln('Getting maze walls, may take a little bit');
+  walls := GetObjectsByID(wall_id, 1, 35);
+  result := length(walls);
+end;
+
+procedure setupmazes; //sets up maze records
+begin
+  with Maze[1] do
+  begin
+    dist := 15;
+    wallcount := 129;  //good
+    //moves := 0;
+  end;
+
+  with Maze[2] do
+  begin
+    dist := 14;
+    wallcount := 108;  //good
+    //moves := 0;
+  end;
+
+  with Maze[3] do
+  begin
+    dist := 14;
+    wallcount := 124;  //good
+    //moves := 0;
+  end;
+
+  with Maze[4] do
+  begin
+    dist := 22;
+    wallcount := 91; //good
+    //moves := 0;
+  end;
+
+  with Maze[5] do
+  begin
+    dist := 8;
+    wallcount := 98; //good
+    //moves := 0;
+  end;
+
+  with Maze[6] do
+  begin
+    dist := 10;
+    wallcount := 71; //good
+    //moves := 0;
+  end;
+
+  with Maze[7] do
+  begin
+    dist := 22;
+    wallcount := 121; //good
+    //moves := 0;
+  end;
+
+  with Maze[8] do
+  begin
+    dist := 19;
+    wallcount := 100; //good
+    //moves := 0;
+  end;
+
+  with Maze[9] do
+  begin
+    dist := 14;
+    wallcount := 53;
+    //moves := 0;
+  end;
+
+  with Maze[10] do
+  begin
+    dist := 13;
+    wallcount := 87; //good
+    //moves := 0;
+  end;
+
+  with Maze[11] do //null maze
+  begin
+    dist := -1;
+    wallcount := -1;
+  end;
+end;
+
+function getmaze : integer; //determines which maze we are in
+var
+  tempmaze : TMaze;
+  i : integer;
+begin
+  result := 0;
+  with tempmaze do
+  begin
+    dist := getdist;
+    wallcount := getwalls; //takes a while :(
+  end;
+  writeln(tempmaze);
+  //PrintOnSmart(['maze dist: ' + inttostr(tempmaze.dist) + ' maze walls: ' + inttostr(tempmaze.wallcount)], point(5, 5), clLime);
+  for i := 1 to 10 do
+    if tempmaze = Maze[i] then
+      break;
+  result := i;
+
+end;
+
+var
+  TopRight, TopLeft, RightTop, RightBottom,
+  BottomLeft, BottomRight, LeftTop, LeftBottom : TPoint;
+
+procedure SetMazePoints;
+begin
+  TopRight := point(357, 42);
+  TopLeft := point(155, 42);
+  RightTop := point(383, 65);
+  RightBottom := point(413, 286);
+  BottomLeft := point(105, 317);
+  BottomRight := point(382, 319);
+  LeftTop := point(113, 63);
+  LeftBottom := point(77, 282);
+end;
+
+function NumPerHour(i : extended) : extended;
+begin
+  result := (3600 * i) / (1 + ((GetTimeRunning) / 1000));
+end;
+
+function getpoints : integer; forward;
+
+function getpointsgained : integer;
+begin
+  result := getpoints - StartPoints;
+end;
+
+procedure PrintProgress;
+begin
+  writeln('----- Awkward Mage Training Arena -----');
+  writeln('- Time Running: ' + timerunning);
+  writeln('- Maze points: ' + IntToStr(mazep) + '/' + inttostr(Players[0].Integers[0]));
+  writeln('- Enchantment points: ' + IntToStr(enchantp) + '/' + inttostr(Players[0].Integers[0]));
+  writeln('- Graveyard points: ' + IntToStr(gravep) + '/' + inttostr(Players[0].Integers[0]));
+  writeln('- Alchemy points: ' + IntToStr(alchemyp) + '/' + inttostr(Players[0].Integers[0]));
+  writeln('- Experience gained(per hour): ' + FloatToStr(exp) + '(' + inttostr(floor(NumPerHour(exp))) + ')');
+  writeln('---------------------------------------');
+end;
+procedure MouseTP(tp : TPoint; rx, ry : Integer; left : boolean);
+begin
+  mouse(tp.x, tp.y, rx, ry, left);
+end;
+
+procedure Mouseflagtp(tp : TPoint; rx, ry : Integer; left : boolean);
+begin
+  mousetp(tp, rx, ry, true);
+  R_WaitToMove(2000);
+  while ismoving do wait(10);
+  wait(200 + random(300));
+end;
+procedure MouseTile(tile : TTile; rx, ry : integer; left : boolean);
+var
+  tp : TPoint;
+  i : integer;
+begin
+  if not TileOnMS(tile, 0) then
+  begin
+    KeyDown(VK_RIGHT);
+    while not TileOnMS(tile, 0) do
+    begin
+      wait(100);
+      if i > 50 then
+      begin
+        keyup(VK_RIGHT);
+        exit;
+      end;
+      inc(i);
+    end;
+    KeyUp(VK_RIGHT);
+  end;
+  tp := TileToMS(tile, 0);
+  mousetp(tp, 2, 2, true);
+end;
+
+function MouseTileUptext(tile : TTile; rx, ry : integer; left : boolean; uptext : TStringArray) : boolean;
+var
+  tp : TPoint;
+  i, reset : integer;
+label
+  here;
+begin
+  result := false;
+  here:
+  if not TileOnMS(tile, 0) then
+  begin
+    KeyDown(VK_RIGHT);
+    i := 0;
+    while not TileOnMS(tile, 0) do
+    begin
+      writeln('1 ' + inttostr(i));
+      wait(100);
+      if i > 50 then
+      begin
+        keyup(VK_RIGHT);
+        exit;
+      end;
+      inc(i);
+    end;
+    KeyUp(VK_RIGHT);
+  end;
+  tp := TileToMS(tile, 0);
+  mmouse(tp.x, tp.y, rx, ry);
+  if not R_waituptextmulti(uptext, 1000) then
+  begin
+    i := 0;
+    KeyDown(VK_left);
+    while not R_IsUpTextMulti(uptext) do
+    begin
+      writeln('2 ' + inttostr(i));
+      wait(100);
+      if i > 50 then
+      begin
+        keyup(VK_left);
+        exit;
+      end;
+      inc(i);
+    end;
+    KeyUp(VK_left);
+  end;
+  mouse(tp.x, tp.y, rx, ry, left);
+  if DidYellowClick then
+  begin
+    inc(reset);
+    if reset > 3 then exit;
+    goto here;
+  end;
+  result := true;
+end;
+
+
+function MouseWaitUpText(x, y, rx, ry : integer; left : boolean; uptext : String) : boolean;
+var
+  x1, y1 : integer;
+begin
+  mmouse(x, y, rx, ry);
+  result := R_WaitUptext(uptext, 15000);
+  if not result then exit;
+  getmousepos(x1, y1);
+  mouse(x1, y1, 0, 0, true);
+end;
+
+function getpoints : integer; //finds pizzaz points
+var
+  points : string;
+  parent, child : integer;
+begin
+  case lowercase(Main.index) of
+    'maze' :
+    begin
+      parent:= 198;
+      child := 4;
+    end;
+    'enchant' :
+    begin
+      parent:= 195;
+      child := 9;
+    end;
+    'graveyard' :
+    begin
+      parent:= 196;
+      child := 12;
+    end;
+    'alchemy' :
+    begin
+      parent:= 194;
+      child := 3;
+    end;
+  end;
+  points :=  R_GetInterfaceText(parent, child)
+  result := strtointdef(points, -1);
+  //writeln(GetValidInterfaces);
+end;
+
+
+
+function enterarena : boolean; forward;
+
+function inarena : boolean;  //true = inside an arena
+begin
+  result := not r_TileOnMM(point(3363, 3318));
+end;
+
+function reenterarena : boolean; //if for some reason you are out of the arena, attempts to go back in
+begin
+  R_FindRandoms;
+  if not enterarena then
+  begin
+    a_debug('Lost connection, cannot find portal, maybe inside random?');
+    logout;
+    terminatescript;
+  end;
+  result := true;
+end;
+
+function A_Relocate(tile : ttile; uptext : TStringArray) : boolean; forward;
+
+function ExitArena : boolean;
+var
+  id, i : integer;
+  portal : TRSObject;
+begin
+  result := true;
+  if not inarena then exit;
+
+  case main.index of
+    'maze' : id := portal_id;
+    'enchant' : id := enchant_exit;
+    'alchemy' : id :=  alchemt_exit;
+    'graveyard' : id := graveyard_exit;
+  end;
+  portal := GetObjectByID(id, OBJ_INTERACTABLE, 32);
+  if not TileOnMs(portal.Tile, 0) then
+    r_walktotile(portal.Tile, 1, 0);
+  MouseTile(portal.Tile, 4, 4, true);
+
+  while inarena do
+  begin
+    wait(10);
+    inc(i);
+    ClickToContinue;
+    if i > 15 * 100 then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
+
+function castgrab : boolean; //casts the grab spell
+begin
+  result := false;
+  if not Cast('telekinetic grab', false) then
+  begin
+    wait(1000);
+    GameTab(tab_magic);
+    if not Cast('telekinetic grab', false) then
+    begin
+      a_debug('out of runes, cannot cast telekeinetic grab. exiting');
+      exitarena;
+      exit;
+    end;
+  end;
+  stats_IncVariable('Magic EXP (Gained)', round(Main.exp));
+  exp := exp + main.exp;
+  result := true;
+end;
+
+function waitforobserve(tp : TPoint; wait : integer) : boolean; //waits till in observe mode
+begin
+  mmouse(tp.x, tp.y, 3, 3);
+  result := waituptext('uardian', wait)
+end;
+
+function walktoguardian : boolean; //walks to guardian
+var
+  guardian : TGroundItemArray;
+begin
+  guardian := GetItemsNear(32);
+  result := r_WindWalk(guardian[0].tile);
+  while IsMoving do
+    wait(100 + random(500));
+  MouseTile(guardian[0].tile, 2, 2, true);
+end;
+
+procedure SolveM1;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+
+  Mouseflagtp(point(379, 319), 3, 3, true);
+  if not waitforobserve(point(237, 61), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(237, 61, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(402, 286), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(236, 133, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(110, 318), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(340, 128, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(83, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(342, 174, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(110, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(257, 178, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(405, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(258, 232, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(356, 48), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(317, 233, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(405, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(315, 205, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(110, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(373, 203, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(83, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(381, 288, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+end;
+
+procedure SolveM2;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+
+  wait(6000 + random(1000));
+  Mouseflagtp(point(359, 50), 3, 3, true);
+  if not waitforobserve(point(233, 149), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(233, 149, 3, 3, true, 'uardian');
+  wait(4000 + random(500));
+
+  Mouseflagtp(point(382, 68), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(236, 66, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(108, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(358, 64, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(84, 290), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(373, 178, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(108, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(235, 183, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(84, 290), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(233, 289, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(140, 49), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(114, 290, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+end;
+
+procedure SolveM3;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+
+  Mouseflagtp(point(138, 67), 3, 3, true);
+  if not waitforobserve(point(411, 287), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(411, 287, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //lu
+
+  Mouseflagtp(point(167, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(142, 287, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+
+  Mouseflagtp(point(408, 66), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(141, 258, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ru
+
+  Mouseflagtp(point(167, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(377, 258, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+
+  Mouseflagtp(point(138, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(370, 204, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //lu
+
+  Mouseflagtp(point(167, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(204, 203, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+
+  Mouseflagtp(point(138, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(209, 107, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //lu
+
+  Mouseflagtp(point(167, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(155, 107, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+end;
+
+procedure SolveM4;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+
+  Mouseflagtp(lefttop, 3, 3, true);
+  if not waitforobserve(point(366, 122), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(366, 122, 3, 3, true, 'uardian');
+    while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(topleft, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(232, 127, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(lefttop, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(233, 107, 3, 3, true, 'uardian');
+   while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(bottomleft, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(182, 103, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(leftbottom, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(181, 126, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(bottomleft, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(124, 120, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(rightbottom, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(116, 200, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(topright, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(346, 201, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(righttop, 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(336, 103, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+end;
+
+procedure SolveM5;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+
+  Mouseflagtp(point(381, 284), 3, 3, true);
+  if not waitforobserve(point(386, 59), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(386, 59, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //bl
+
+  Mouseflagtp(point(112, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(410, 292, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//lb
+
+  Mouseflagtp(point(164, 48), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(318, 290, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//ul
+
+  Mouseflagtp(point(138, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(311, 63, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //lu
+
+  Mouseflagtp(point(139, 318), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(235, 65, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//bl
+
+  Mouseflagtp(point(112, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(231, 292, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//lb
+
+  Mouseflagtp(point(164, 48), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(140, 286, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//ul
+end;
+
+procedure SolveM6;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+
+  Mouseflagtp(point(83, 288), 3, 3, true);
+  if not waitforobserve(point(260, 154), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(260, 154, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//lb
+
+  Mouseflagtp(point(110, 319), 3, 3, true);
+  if not castgrab then  exit;
+  MouseWaitUpText(182, 156, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//bl
+
+  Mouseflagtp(point(382, 66), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(175, 200, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//rt
+
+  Mouseflagtp(point(139, 48), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(289, 200, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//tl
+
+  Mouseflagtp(point(113, 69), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(283, 104, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //lt
+
+  Mouseflagtp(point(110, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(155, 109, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//bl
+
+  Mouseflagtp(point(407, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(142, 256, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //rb
+
+  Mouseflagtp(point(357, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(376, 258, 3, 3, true, 'uardian');
+  wait(4000 + random(500));
+end;
+
+procedure SolveM7;   //works
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+  Mouseflagtp(point(410, 59), 3, 3, true);
+  if not waitforobserve(point(136, 281), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(136, 281, 3, 3, true, 'uardian');
+  wait(4000 + random(500));  //rt
+
+  Mouseflagtp(point(382, 42), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(412, 286, 3, 3, true, 'uardian');
+  wait(4000 + random(500));  //tr
+
+  Mouseflagtp(point(135, 63), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(402, 201, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //lt
+
+  Mouseflagtp(point(162, 43), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(175, 197, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //tl
+
+  Mouseflagtp(point(410, 59), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(182, 127, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //rt
+
+  Mouseflagtp(point(382, 42), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(393, 124, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //tr
+
+  Mouseflagtp(point(135, 63), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(389, 104, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//lt
+
+  Mouseflagtp(point(162, 43), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(153, 102, 3, 3, true, 'uardian');
+  wait(4000 + random(500));//tl
+
+  Mouseflagtp(point(410, 59), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(160, 58, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //rt
+
+end;
+
+procedure SolveM8;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(4000 + random(1000));
+
+  Mouseflagtp(point(110, 319), 3, 3, true);//bl
+  if not waitforobserve(point(260, 174), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(260, 174, 3, 3, true, 'uardian');
+    while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  writeln(1);
+  wait(2000);
+
+  Mouseflagtp(point(82, 286), 3, 3, true);//lb
+  if not castgrab then exit;
+  MouseWaitUpText(260, 258, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(140, 46), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(226, 257, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+
+  Mouseflagtp(point(113, 66), 3, 3, true);//lu
+  if not castgrab then exit;
+  MouseWaitUpText(232, 180, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(140, 46), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(152, 180, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ul
+
+  Mouseflagtp(point(383, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(156, 135, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000); //ru
+
+  Mouseflagtp(point(110, 319), 3, 3, true);//bl
+  if not castgrab then exit;
+  MouseWaitUpText(234, 130, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(82, 286), 3, 3, true);//lb
+  if not castgrab then exit;
+  MouseWaitUpText(233, 156, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(110, 319), 3, 3, true);//bl
+  if not castgrab then exit;
+  MouseWaitUpText(128, 154, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+
+  Mouseflagtp(point(405, 290), 3, 3, true);//rb
+  if not castgrab then exit;
+  MouseWaitUpText(108, 286, 3, 3, true, 'uardian');
+  while not R_Animating do wait(100);
+  while R_Animating do wait(100);
+  wait(2000);
+end;
+
+procedure SolveM9;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(5000 + random(1000));
+  Mouseflagtp(point(140, 47), 3, 3, true);
+  if not waitforobserve(point(381, 284), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+
+  if not castgrab then exit;
+  MouseWaitUpText(381, 284, 3, 3, true, 'uardian');
+  wait(4000 + random(500));
+
+
+
+  Mouseflagtp(point(114, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(360, 63, 3, 3, true, 'uardian');
+  wait(4000 + random(500));
+
+  Mouseflagtp(point(379, 316), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(260, 64, 3, 3, true, 'uardian');
+  wait(4000 + random(500));
+
+  Mouseflagtp(point(407, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(259, 200, 3, 3, true, 'uardian');
+  wait(3000 + random(500));
+
+  Mouseflagtp(point(140, 47), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(318, 198, 3, 3, true, 'uardian');
+  wait(3000 + random(500));
+
+  Mouseflagtp(point(114, 67), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(312, 132, 3, 3, true, 'uardian');
+  wait(3000 + random(500));
+
+  Mouseflagtp(point(109, 319), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(128, 130, 3, 3, true, 'uardian');
+  wait(3000 + random(500));
+end;
+
+procedure SolveM10;
+var
+  i : integer;
+label
+  here;
+begin
+  here:
+  if i > 5 then
+  begin
+    exitarena;
+    a_debug('for some reason cannot get into observation mode, leaving');
+    exit;
+  end;
+  wait(6000 + random(1000));
+  Mouseflagtp(point(141, 318), 3, 3, true);
+  if not waitforobserve(point(335, 80), 5000) then
+  begin
+    inc(i);
+    if not walktoguardian then
+    begin
+      exitarena;
+      a_debug('for some reason cannot find guardian, leaving');
+      exit;
+    end;
+    goto here;
+  end;
+  if not castgrab then exit;
+  MouseWaitUpText(335, 80, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //bl
+
+  Mouseflagtp(point(115, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(339, 106, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //lb
+
+  Mouseflagtp(point(141, 318), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(283, 100, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //bl
+
+  Mouseflagtp(point(435, 290), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(285, 203, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //rb
+
+  Mouseflagtp(point(141, 318), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(401, 206, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //bl
+
+  Mouseflagtp(point(115, 289), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(406, 259, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //lb
+
+  Mouseflagtp(point(141, 318), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(204, 257, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //bl
+
+  Mouseflagtp(point(435, 290), 3, 3, true);
+  if not castgrab then exit;
+  MouseWaitUpText(202, 287, 3, 3, true, 'uardian');
+  wait(4000 + random(500)); //rb
+
+end;
+
+
+
+function domaze : boolean; //maze main loop
+var
+  CurrMaze, i, points1, points2, time : integer;
+  guardian : TGroundItemarray;
+  npc : TNPC;
+  me1 : TPlayer;
+begin
+  marktime(time);
+  if getpoints >= Players[currentplayer].Integers[0] then
+  begin
+    result := true;
+    mazep := getpoints;
+    exitarena;
+    exit;
+  end;
+  repeat
+    if not loggedin then
+    begin
+      loginplayer;
+      R_FindRandoms;
+      reenterarena;
+    end;
+    wait(1000);
+    AkwardAntiBan;
+    CurrMaze := getmaze;
+    result := true;
+    points1 := getpoints;
+    if currmaze = 11 then
+    begin
+      writeln('cannot find maze, exiting and retrying');
+      writeln('maze dist: ' + inttostr(getdist) + ' maze walls: ' + inttostr(getwalls));
+      result := false;
+    end;
+    me1 := r_GetMe;
+    PrintOnSmart(['Time running: ' + TimeRunning,
+                  'Current Maze: ' + inttostr(currmaze),
+                  'Points gained: ' + inttostr(getpointsgained),
+                  'Current Level: ' + inttostr(R_GetSkillLevel(SKILL_MAGIC)),
+                  'Points/H: ' + inttostr(floor(NumPerHour(getpointsgained))),
+                  'EXP/H: ' + inttostr(floor(NumPerHour(exp))),
+                  'Aprox. time till finished: ' + inttostr(floor((players[currentplayer].integers[0] - getpoints) / NumPerHour(exp)))], point(5, 5), clLime);
+    clicknorth(true);
+    guardian := GetItemsNear(32);
+    r_WindWalk(guardian[0].tile);
+    while IsMoving do
+      wait(100 + random(500));
+    MouseTile(guardian[0].tile, 2, 2, true);
+    //wait(750 + random(500));
+    writeln('Current Maze: ' + inttostr(currmaze));
+                        //this line is epicly l33t, just sayin
+    gametab(tab_magic);
+    case CurrMaze of //solve maze procedures
+      1 : SolveM1;
+      2 : SolveM2;
+      3 : SolveM3;
+      4 : SolveM4;
+      5 : SolveM5;
+      6 : SolveM6;
+      7 : SolveM7;
+      8 : SolveM8;
+      9 : SolveM9;
+      10 : SolveM10;
+    end;
+    PrintOnSmart(['Time running: ' + TimeRunning,
+                  'Current Maze: ' + inttostr(currmaze),
+                  'Points gained: ' + inttostr(getpointsgained),
+                  'Current Level: ' + inttostr(R_GetSkillLevel(SKILL_MAGIC)),
+                  'Points/H: ' + inttostr(floor(NumPerHour(getpointsgained))),
+                  'EXP/H: ' + inttostr(floor(NumPerHour(exp))),
+                  'Aprox. time till finished: ' + inttostr(floor((players[currentplayer].integers[0] - getpoints) / NumPerHour(exp)))], point(5, 5), clLime);
+    {}
+    while not clicktocontinue do
+    begin
+      inc(i);
+      if i > (10 * 1000 * 20) then
+      begin
+        result := false;
+        exit;
+      end;
+      wait(10);
+    end;
+    AkwardAntiBan;
+    npc := R_GetNPC('Maze Guardian', false);
+    MouseTile(npc.Tile, 2, 2, true);
+    while not clicktocontinue do
+      wait(10);
+    while not clicktocontinue do
+      wait(10);
+    clicktocontinue;
+    wait(500 + random(200));
+    clicktocontinue;
+    wait(500 + random(200));;
+    clicktocontinue;
+    wait(500 + random(200));
+    clicktocontinue;
+    while not (GetColor(134, 365) = 11451587) and
+      (GetColor(395, 365) = 12438223) do wait(5);
+    wait(500 + random(500));
+    mouse(232, 402, 5, 1, true);
+    while not clicktocontinue do
+      wait(10);
+    while not clicktocontinue do
+      wait(10);
+
+    while npc.Tile.x > 0 do
+      npc := R_GetNPC('Maze Guardian', false);
+    points2 := getpoints;
+    stats_IncVariable('Telekinesis Points (Gained)', points2 - points1);
+    if timefrommark(time) > 1000 * 60 * 50 then
+    begin
+      marktime(time);
+      a_debug('Commited to stats');
+      stats_Commit;
+    end;
+    mazep := getpoints;
+    PrintProgress;
+  until getpoints >= Players[currentplayer].Integers[0];
+  ExitArena;
+end;
+
+function E_Relocate(where : integer) : boolean; //goes to object
+var
+  obj : TRSObjectArray;
+  p : TRSObject;
+  i : integer;
+begin
+  obj := GetObjectsByID(where, 0, 25);
+  p := GetObjectByID(where, 0, 20);
+  if where <> dragonstone or enchant_hole then
+  for i := 0 to high(obj) do
+  begin
+    if obj[i].Tile.y < p.Tile.y then continue;
+    if obj[i].Tile.y >= p.Tile.y then
+    begin
+      obj[0] := obj[i];
+      break;
+    end;
+  end;
+  try
+  begin
+  if not R_TileOnMM(obj[0].Tile) then
+    r_WindWalk(obj[0].tile)
+  else
+    R_WalkToTile(obj[0].tile, 3, 0);
+  while ismoving do wait(100);
+  result := TileOnMS(obj[0].Tile, 0);
+  end;
+  except
+    result := false;
+  end;
+end;
+
+function checkdragonstone : boolean;
+var
+  dragonstones : TGroundItemArray;
+  i : integer;
+begin
+  result := true;
+  if r_invfull then
+    exit;
+  dragonstones := GetItemsNear(20);
+  for i := 0 to high(dragonstones) do
+  begin
+    writeln(dragonstones);
+
+    if not dragonstones[i].id = dragonstone then continue;
+    a_debug('found dragonstone');
+    if not R_TileOnMM(dragonstones[i].Tile) then
+      continue;
+    if not R_WalkToTile(dragonstones[i].Tile, 3, 0) then
+    begin
+      result := false;
+      A_Debug('Cannot walk to dragonstone for some reason, attempting to retry');
+      if not inarena then
+        if not reenterarena then
+        begin
+          a_debug('Cannot reenter arena, terminating');
+          logout;
+          terminatescript;
+        end;
+      i := -1;
+    end;
+    a_debug('Walked to stone, picking it up now');
+    MouseTileUptext(dragonstones[i].Tile, 2, 2, true, ['ragonstone']);
+    R_waittomove(2000);
+    while ismoving do wait(10);
+  end;
+ end;
+
+function GetBonus : integer; //finds bonus shape
+var
+  x, y, cubedtm, cylinderdtm, pentdtm, icodtm : integer;
+begin
+  cubedtm := DTMFromString('mQwAAAHicY2ZgYFBiYWBQA2JzIO5mZGCYDMT9QDyxXJfhynY5hpNrZRnYgepgmBUJAwEACdkG1A==');
+  cylinderdtm := DTMFromString('mQwAAAHicY2ZgYGBmYWD4yszA8BmIVzAyMGwA4ulALFgtwiAVLM0gUCrMwA5UB8OsSBgIAAqcBc8=');
+  pentdtm := DTMFromString('mQwAAAHicY2ZgYGBnYWD4yczA8BGIVzAyMEwF4iVAfFhDhmGrqhRDr6wIAztIHRSzImEgAAAtKAbA');
+  icodtm := DTMFromString('mQwAAAHicY2ZgYOBnYWB4xczA8A+IVzIyMCwG4klAHBl9kkFEYiKDqMRkBnagOhhmRcJAAAA1gQcE');
+  if FindDTM(pentdtm, x, y, 451, 255, 508, 329) then
+    result := pentamid;
+  if FindDTM(cubedtm, x, y, 451, 255, 508, 329) then
+    result := cube;
+  if FindDTM(cylinderdtm, x, y, 451, 255, 508, 329) then
+    result := cylinder;
+  if FindDTM(icodtm, x, y, 451, 255, 508, 329) then
+    result := icosahedron;
+  freedtm(cubedtm);
+  freedtm(pentdtm);
+  freedtm(cylinderdtm);
+  freedtm(icodtm);
+end;
+
+function CollectBonus : Boolean;  //collects bonus shape
+var
+  temp_id : integer;
+  obj : TRSObject;
+  tp : TPoint;
+  i, a, b, c : integer;
+begin
+  if not loggedin then
+  begin
+    loginplayer;
+    R_FindRandoms;
+    reenterarena;
+  end;
+  result := true;
+  if r_invfull then exit;
+  temp_id := GetBonus;
+  writeln(temp_id);
+  E_Relocate(temp_id);
+  while IsMoving do
+    wait(100);
+
+  for i := 0 to 4 do
+  begin
+    //AkwardAntiBan;
+    if r_invfull then exit;
+    obj := GetObjectByID(temp_id, 0, 25);
+    tp := TileToMS(obj.tile, 0);
+    MouseWaitUpText(tp.x, tp.y, 3, 3, true, 'ile');
+    a := R_InvCount;
+    b := R_InvCount;
+    while (a = b) do
+    begin
+      wait(100);
+      b := R_InvCount;
+      if r_invfull then break;
+      inc(c);
+      if c > 50 then break;
+    end;
+  end;
+  AkwardAntiBan;
+end;
+
+function Enchant : boolean; //enchants shapes in inventory, bonus shape priority
+var
+  bonus : integer;
+  item : tinvitem;
+begin
+  result := false;
+  repeat
+    if not loggedin then
+    begin
+      loginplayer;
+      R_FindRandoms;
+      reenterarena;
+    end;
+    AkwardAntiBan;
+    case GetBonus of
+      pentamid : bonus := pent_inv;
+      cube : bonus := cube_inv;
+      icosahedron : bonus := ico_inv;
+      cylinder : bonus := cylinder_inv;
+    end;
+    if not Cast(spellused, false) then
+    begin
+      wait(500 + random(1000));
+      gametab(tab_magic);
+      if not Cast(spellused, false) then
+      begin
+        a_debug('Out of runes, terminating');
+        terminatescript;
+      end;
+    end;
+    stats_IncVariable('Magic EXP (Gained)', round(Main.exp));
+    exp := exp + main.exp;
+    wait(100 + random(100));
+    if R_ItemExists(bonus, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+    if R_ItemExists(dragonstone, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+
+    if R_ItemExists(pent_inv, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+    if R_ItemExists(cube_inv, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+    if R_ItemExists(cylinder_inv, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+    if R_ItemExists(ico_inv, item) then
+    begin
+      mouseitem(item.Slot, true)
+      wait(1000 + random(250));
+      continue;
+    end;
+
+    result := true;
+    break;
+  until false;
+end;
+
+function EnchantMainloop : boolean;
+var
+  done, a, b, c, points1, points2, time : integer;
+  obj : TRSObject;
+  tp : TPoint;
+  me :TPlayer;
+begin
+  marktime(time);
+  if getpoints >= Players[currentplayer].Integers[0] then
+  begin
+    result := true;
+    enchantp := getpoints;
+    exitarena;
+    exit;
+  end;
+  repeat
+   wait(200 + random(500));
+   points1 := getpoints;
+
+    me := R_Getme;
+    PrintOnSmart(['Time running: ' + TimeRunning,
+                  'Points gained: ' + inttostr(getpointsgained),
+                  'Loads done: ' + inttostr(done),
+                  'Current Level: ' + inttostr(R_GetSkillLevel(SKILL_MAGIC)),
+                  'Points/H: ' + inttostr(floor(NumPerHour(getpointsgained))),
+                  'EXP/H: ' + inttostr(floor(NumPerHour(exp)))], point(5, 5), clYellow);
+    checkdragonstone;
+    CollectBonus;
+    CollectBonus;
+    CollectBonus;
+    CollectBonus;
+    CollectBonus;
+    Enchant;
+    if not E_Relocate(enchant_hole) then
+    begin
+      a_debug('cannot find deposit hole, attempting to leave arena and try again');
+      logout;
+      loginplayer;
+      reenterarena;
+      if not E_Relocate(enchant_hole) then
+      begin
+        a_debug('Tell awkwardsaw that something is messed up, cannot find the deposit hole');
+        terminatescript;
+      end;
+    end;
+    AkwardAntiBan;
+    obj := GetObjectByID(enchant_hole, 0, 15);
+    tp := TileToMS(obj.tile, 0);
+    a := R_InvCount;
+    MouseWaitUpText(tp.x, tp.y, 3, 3, true, 'ole');
+
+    b := R_InvCount;
+    while (a = b) do
+    begin
+      wait(100);
+      b := R_InvCount;
+      if not r_invfull then break;
+      if clicktocontinue then break;
+      inc(c);
+      if c > 60 then break;
+    end;
+    AkwardAntiBan;
+    inc(done);
+    result := true;
+    points2 := getpoints;
+    stats_IncVariable('Enchantment Points (Gained)', points2 - points1);
+    if timefrommark(time) >= 1000 * 60 * 6 then
+    begin
+
+      marktime(time);
+      a_debug('Commited to stats');
+      stats_Commit;
+    end;
+    enchantp := getpoints;
+    PrintProgress;
+  until getpoints >= Players[currentplayer].Integers[0];
+  ExitArena;
+end;
+
+function G_Relocate(id : integer) : boolean; //relocates in graveyard
+var
+  obj : TRSObject;
+begin
+  obj := GetObjectByID(id, 0, 32);
+  if not TileOnMS(obj.Tile,0) then
+  if not R_TileOnMM(obj.Tile) then
+    r_WindWalk(obj.tile)
+  else
+    R_WalkToTile(obj.tile, 3, 0);
+
+  MouseTile(obj.Tile , 3, 3, true);
+  while ismoving do wait(100);
+  result := TileOnMS(obj.Tile, 0);
+end;
+
+function GetBones : boolean; //collects bones
+var
+  stack : TRSObject;
+  me :TPlayer;
+begin
+  result := false;
+  stack := GetObjectByIDEx([t4_stack, t3_stack, t2_stack, t1_stack], 0, 7);
+  mousetile(stack.Tile, 4, 4, true);
+  stack := GetObjectByIDEx([t4_stack, t3_stack, t2_stack, t1_stack], 0, 7);
+  while ismoving do wait(10);
+  a_debug('at bone stack');
+  while r_invcount < 17 do
+  begin
+    //stack := GetObjectByIDEx([t4_stack, t3_stack, t2_stack, t1_stack], 0, 7);
+    a_debug('collecting bones, in loop');
+    mousetileuptext(stack.Tile, 4, 4, true, ['rab', 'ones', 'Bones']);
+    wait(250 + random(250));
+    me := r_Getme;
+    if R_GetMMLevels('hp')  <= ((R_GetSkillLevel(SKILL_HITPOINTS) * 0.20) * 10) then
+    begin
+      result := true;
+      exit;
+    end;
+    //while R_Animating do wait(10);
+  end;
+  result := r_invcount >= 13;
+end;
+
+function eatfood : boolean; //eats food if below half health
+var
+  me :TPlayer;
+begin
+  result := true;
+  me := R_GetMe;
+  if R_GetMMLevels('hp')  <= ((R_GetSkillLevel(SKILL_HITPOINTS) * 0.50) * 10) then
+  while R_CountItemEx(['Banana', 'Peach']) > 0 do
+  begin
+    a_debug('eating food, in loop');
+    if not  R_ClickItemBy('Banana', 'Eat') then
+      R_ClickItemBy('Peach', 'Eat');
+    wait(100);
+    //while R_Animating do wait(10);
+    wait(1250 + random(500));
+    if R_GetMMLevels('hp')  >= ((R_GetSkillLevel(SKILL_HITPOINTS) * 0.85) * 10) then break;
+    stats_IncVariable('Food (Eaten)', 1);
+  end;
+  if R_GetMMLevels('hp')  <= (R_GetSkillLevel(SKILL_HITPOINTS) * 0.75) then
+  begin
+    result := false;
+    a_debug('eating didnt do anygood, logging out to prevent death');
+    logout;
+    terminatescript;
+  end;
+end;
+
+function GraveyardMainLoop : boolean;
+var
+  x, y, done, points1, points2, c, time : integer;
+  obj : TRSObject;
+  me :TPlayer;
+  col : TColor;
+begin
+  if getpoints >= Players[currentplayer].Integers[0] then
+  begin
+    result := true;
+    gravep := getpoints;
+    exitarena;
+    exit;
+  end;
+  if enterarena then
+    if not G_Relocate(t4_stack) then
+      if not G_Relocate(t3_stack) then
+        if not G_Relocate(t2_stack) then
+          if not G_Relocate(t1_stack) then
+          begin
+            a_debug('Not in arena for somereason, cannot find any bone stacks');
+            logout;
+            terminatescript;
+          end;
+  marktime(time);
+  repeat
+    makecompass(0);
+    points1 := getpoints;
+    result := false;
+    me := R_GetMe;
+    col := RGBtoColor(255, 0, 255);
+    PrintOnSmart(['Time running: ' + TimeRunning,
+                  'Points gained: ' + inttostr(getpointsgained),
+                  'Loads done: ' + inttostr(done),
+                  'Current Level: ' + inttostr(R_GetSkillLevel(SKILL_MAGIC)),
+                  'Points/H: ' + inttostr(floor(NumPerHour(getpointsgained))),
+                  'EXP/H: ' + inttostr(floor(NumPerHour(exp)))], point(5, 5), col);
+
+    //if not  Cast(spellused, false) then
+    if R_CountItem('Banana') < 16 then
+    begin
+      a_debug('collecting bones');
+      GetBones;
+      a_debug('collected bones');
+      wait(200 + random(300));
+      gametab(tab_Magic);
+      if not FindDTM(Main.spelldtm, x, y, mix1, miy1, mix2, miy2) then
+      begin
+        freedtm(Main.spelldtm);
+        a_debug('cannot cast spell for some reason');
+        logout;
+        terminatescript;
+      end
+      else
+      begin
+        //freedtm(Main.spelldtm);
+        a_debug('found dtm, casting spell');
+        mousewaituptext(x, y, 3, 3, true, 'ones');
+      end;
+    end;
+    wait(500 + random(500));
+
+    while R_Animating do wait(200);
+    wait(250);
+    eatfood;
+    if R_CountItemEx(['Banana', 'Peach']) < 4 then continue;
+    a_debug('getting ready to find deposit');
+    obj := GetObjectByID(grave_deposit, 0, 32);
+    MouseTileUptext(obj.tile, 3, 3, true, ['eposit', 'Food', 'chute']);
+    a_debug('clicked deposit');
+    R_WaitToMove(5000);
+    while R_CountItemEx(['Banana', 'Peach']) > 0 do
+    begin
+      inc(C);
+      if c > 30 then break;
+      wait(200);
+    end;
+     a_debug('fruit deposited');
+    wait(900 + random(500));
+    result := true;
+    inc(done);
+    points2 := getpoints;
+    stats_IncVariable('Graveyard Points (Gained)', points2 - points1);
+
+    stats_IncVariable('Magic EXP (Gained)', round(Main.exp));
+    exp := exp + main.exp;
+    if timefrommark(time) > 1000 * 60 * 5 then
+    begin
+      marktime(time);
+      a_debug('Commited to stats');
+      stats_Commit;
+    end;
+    gravep := getpoints;
+    PrintProgress;
+  until getpoints >= Players[currentplayer].Integers[0];
+  a_debug('Got enough points, leaving arena');
+  ExitArena;
+end;
+
+const
+  I_BOOTS = 0;
+  I_SHIELD = 1;
+  I_HELM = 2;
+  I_EMERALD = 3;
+  I_SWORD = 4;
+
+  C_BOOTS = 9;
+  C_SHIELD = 10;
+  C_HELM = 11;
+  C_EMERALD = 12;
+  C_SWORD = 13;
+
+function GetItemToAlch : integer; //finds item that is valued 30 gp
+var
+  i : integer;
+  childarr : TIntegerArray;
+  amount : string;
+begin
+  result := -1;
+  childarr := [C_BOOTS, C_SHIELD, C_HELM, C_EMERALD, C_SWORD];
+  for i := I_BOOTS to I_SWORD do
+  begin
+    amount :=  R_GetInterfaceText(194, childarr[i])
+    if amount = '30' then
+      result := i;
+  end;
+end;
+
+
+
+function A_Relocate(tile : ttile; uptext : TStringArray) : boolean; //walks + clicks tile
+begin
+  if not R_TileOnMS(Tile,0) then
+  if not R_TileOnMM(Tile) then
+    r_WindWalk(tile)
+  else
+    R_WalkToTile(tile, 0, 0);
+  while ismoving do wait(100);
+  MouseTileUptext(Tile, 2, 4, true, uptext)
+  while ismoving do wait(100);
+  result := TileOnMS(Tile, 0);
+end;
+
+function DepositCoins(checkcoins : boolean) : boolean; //deposit coins if you have enough
+var
+  item : TInvItem;
+  depositobj : TRSObject;
+begin
+  result := true;
+  if checkcoins then
+  begin
+    writeln('checking coins');
+    if R_ItemExists('Coins', Item) then
+      if  item.StackSize < 1000 then
+        exit
+      else
+        if not inrange(item.StackSize mod 100, 0, 18) then
+          exit;
+  end;
+  depositobj := GetObjectByIDEx([alchemy_deposit], 0, 30);
+      if not a_relocate(depositobj.Tile, ['eposit', 'oin', 'ollector']) then
+      begin
+        result := false;
+        exit;
+      end;
+      while not ClickToContinue do wait(10);
+      result := true;
+end;
+
+function CanAlch : boolean; //true = item in inventory worth 30 gp
+var
+  itemtoalch : Integer;
+  idarr : TIntegerArray;
+begin
+  itemtoalch := GetItemToAlch;
+  idarr := [boots_inv, shield_inv, helm_inv, emerald_inv, sword_inv];
+  result := R_CountItem(idarr[itemtoalch]) > 0;
+end;
+
+function findalchitem : boolean;  //fills inventory with items, hopefully not to much of one item
+var
+  CupboardIDs1, CupboardIDs2: TIntegerArray;
+  ri, ri1, c, itemtoalch, i, a, d, resets : integer;
+  cupboard : TRSObject;
+  text : string;
+  TextArr : TStringArray;
+  b, f : boolean;
+label
+  here, comeback;
+begin
+  result := false;
+
+  resets := 0;
+
+  cupboardIDs1 := [10783, 10785, 10787, 10789, 10791, 10793, 10795, 10797]; //cupboard id when closed
+  cupboardIDs2 := [10784, 10786, 10788, 10790, 10792, 10794, 10796, 10798]; //cupboard id when open
+
+  here:
+  if CanAlch then  //if can alch exit, no need to waste time if you can :)
+  begin
+    result := true;
+    exit;
+  end;
+  if R_InvFull then  //^ usually means that inv full, but no items that you can alch.
+  begin
+    result := true;
+    exit;
+  end;
+
+  inc(c);  //failsafe, don't repeat loop to much
+  if c > 15 then
+  begin
+    a_debug('attempted to find starting cupboard to many times, reseting');
+    depositcoins(false);
+    exitarena;
+    reenterarena;
+    c := 0;
+    inc(resets);
+    if resets > 2 then
+    begin
+      result := false
+      a_debug('Reset twice, terminating');
+      ExitArena;
+      TerminateScript;
+    end;
+    goto here;
+  end;
+
+  if CanAlch then  //if can alch exit, no need to waste time if you can :)
+  begin
+    result := true;
+    exit;
+  end;
+
+  ri := random(high(cupboardids1)); //random index for cupboard array,
+  writeln('1 ri ' + inttostr(ri));  //used to find a random cupboard
+
+  itemtoalch := GetItemToAlch; //gets the current item that is valued at 30gp
+
+  a := 0; //resets a
+  comeback:
+
+  inc(a); //failsafe
+
+  b := false; //resets
+  try
+    cupboard := GetObjectByIDEx([cupboardIDs1[ri], cupboardIDs2[ri]], 0, 30); //finds random cupboard
+  except
+    a_debug('out of range avoided, reseting random index');
+    //goto here;
+  end;
+  if not A_Relocate(cupboard.Tile, ['earch', 'Cupboard']) then //goes to cupboard, takes item
+    if reenterarena then
+      goto here //if it is out of arena, and re-enters arena, it starts procedure over
+    else
+    begin
+      a_debug('For some reason cannot enter arena. terminating');
+      logout;
+      terminatescript;
+    end;
+
+  r_WaitToMove(2000);
+  while R_Moving or R_Animating do wait(1000); //waits to go to cupboard, and take item
+  wait(1000 + random(500));
+
+
+  text := GetBlackChatMessage; //gets last system message
+  TextArr := ['boots', 'kiteshield', 'helm', 'Emerald', 'longsword', 'empty']; //possible items in cupboard
+
+  for i := 0 to high(textarr) do //loops through to find item in TextArr in 'text'
+  begin
+    if Pos(textarr[i], text) > 0 then //if it finds item in text
+    begin
+      if i < high(textarr) then
+      begin
+        writeln(i);
+        i := i - GetItemToAlch;
+        writeln('i ' + inttostr(i)); //try to relocate cupboards, doesnt really work
+        ri1 := ri - i;
+        if ri1 > high(cupboardIDs1) then
+          ri1 := (ri1 - ri) + ri;
+        if ri1 <  0 then
+          ri1 := (ri1 * -1) - high(cupboardIDs1);
+        writeln('ri ' + inttostr(ri));
+        //break;
+      end;
+      if i = high(textarr) then
+      begin
+        f := true;
+        break;
+      end;
+      if ri = ri1 then
+      begin                 //if cupboard item = alch item, get 6 more of them
+        for d := 0 to 5 do
+        begin
+
+          if r_invfull then
+          begin
+            result := true;
+            exit;
+          end;
+          MouseTileUptext(cupboard.Tile, 4, 4, true, ['pen', 'earch', 'oard']);
+          wait(200 + random(300));
+        end;
+      end;
+
+      ri := ri1;  //sets new cupboard index
+
+      if a <= 5 then  //if the item valued 30 hasnt changed, and this is no more than the 5th loop
+        b := true //it restarts the comehere: loop
+      else
+        c := 0; //if it already looped 5 times, or the item changed, restart the procedure
+
+      //writeln(TextArr[i]);
+      if CanAlch then  //if can alch exit, no need to waste time if you can :)
+      begin
+        result := true;
+        exit;
+      end;
+      break; //breaks out of loop if it found the item
+    end;
+  end;
+  if f then goto here;
+  if b then goto comeback;
+  goto here;
+
+end;
+
+function waittoalch : boolean;  //waits about 1min to alch if inv full, and cannot alch
+var
+  t : integer;
+begin
+  marktime(t);
+  writeln('Invfull, cannot alch any items. waiting about 1min');
+  while (TimeFromMark(t) < (1000 * randomrange(50, 70))) or not canalch do
+  begin
+    if canalch then break;
+    akwardantiban;
+  end;
+  result := canalch;
+end;
+
+function alch : boolean; //alchs items that = 30 gp
+var
+  idarr : TIntegerArray;
+  b : boolean;
+begin
+  b := false;
+  idarr := [boots_inv, shield_inv, helm_inv, emerald_inv, sword_inv];
+  //R_ItemExistsEx(idarr, invitem);
+  gametab(tab_magic);
+  repeat
+    result := false;
+    writeln(0);
+    if not Cast(spellused, false) then
+    begin
+      a_debug('Cannot cast spell, attempting to deposit money and then leave');
+      result := false;
+      depositcoins(false);
+      ExitArena;
+      logout;
+      exit;
+    end;
+
+
+    wait(200 + random(300));
+    writeln(GetUpText);
+    if IsUpTextMultiCustom(['Cast','evel', 'Level', 'Alchemy', 'ow', 'igh']) then
+    begin
+      writeln(1);
+      //b := R_InvCount < 16;
+      if not canalch then
+    begin
+      if r_invcount < 23 then
+      begin
+        a_debug('done alching, exiting now');
+        result := true;
+        exit;
+      end else
+        if not waittoalch then
+        begin
+          depositcoins(false);
+          //exitarena;
+          //reenterarena;
+          result := true;
+          exit;
+        end;
+    end;
+      R_ClickItemBy(idarr[GetItemToAlch], 'Cast');
+      wait(800 + random(700));
+      //while not GetCurrentTab = tab_Magic do wait(10);
+      //wait(100);
+      stats_IncVariable('Magic EXP (Gained)', round(Main.exp));
+      exp := exp + main.exp;
+    end;
+    result := true;
+  until b;
+
+end;
+
+function AlchemyMainLoop : boolean;
+var
+  done, points1, points2, time : integer;
+  col : TColor;
+  me :TPlayer;
+begin
+  marktime(time);
+  if getpoints >= Players[currentplayer].Integers[0] then
+  begin
+    result := true;
+    alchemyp := getpoints;
+    exitarena;
+    exit;
+  end;
+  repeat
+
+    result := false;
+    points1 := getpoints;
+    col := RGBtoColor(3, 237, 232);
+    me := R_GetMe;
+    PrintOnSmart(['Time running: ' + TimeRunning,
+                  'Points gained: ' + inttostr(getpointsgained),
+                  'Loads done: ' + inttostr(done),
+                  'Current Level: ' + inttostr(R_GetSkillLevel(SKILL_MAGIC)),
+                  'Points/H: ' + inttostr(floor(NumPerHour(getpointsgained))),
+                  'EXP/H: ' + inttostr(floor(NumPerHour(exp)))], point(5, 5), col);
+    writeln('Item to alch: ' + inttostr(GetItemToAlch));
+    if not FindAlchItem then exit;
+    if not alch then exit;
+    AkwardAntiBan;
+    writeln('hello');
+    if not DepositCoins(true) then
+      exit
+    else
+      if timefrommark(time) > 1000 * 60 * 6 then
+      begin
+        if stats_Commit then
+        begin
+          a_debug('Commited to stats');
+          marktime(time);
+        end;
+      end;
+    result := true;
+    points2 := getpoints;
+    stats_IncVariable('Alchemy Points (Gained)', points2 - points1);
+
+    inc(done);
+    alchemyp := getpoints;
+    PrintProgress;
+  until getpoints >= Players[currentplayer].Integers[0];
+  ExitArena;
+end;
+
+function GetEnchantSpell : String;  //determines enchantment spell
+begin
+
+  case StartLevel of
+    1..6 : A_Debug('player doesn''t have high enough magic level');
+    7..26 :
+    begin
+      result := 'lvl-1 enchant';
+      Main.exp := 13.1;
+    end;
+    27..48 :
+    begin
+      result := 'lvl-2 enchant';
+      Main.exp := 27.8;
+    end;
+    49..56 :
+    begin
+      result := 'lvl-3 enchant';
+      Main.exp := 44.3;
+    end;
+    57..67 :
+    begin
+      result := 'lvl-4 enchant';
+      Main.exp := 50.3;
+    end;
+    68..86 :
+    begin
+      result := 'lvl-5 enchant';
+       Main.exp := 58.5;
+    end;
+    87..99 :
+    begin
+      result := 'lvl-6 enchant';
+      Main.exp := 72.8;
+    end;
+  end;
+end;
+
+function GetAlchSpell : string; //determines alchemy spell
+begin
+  if startlevel < 55 then
+  begin
+    main.exp := 25;
+    result := 'low level alchemy';
+  end else
+  begin
+    main.exp := 65;
+    result := 'high level alchemy';
+    writeln(result);
+  end;
+end;
+
+function GetGraveyardSpell : string;
+begin
+  if startlevel < 60 then
+  begin
+    Main.spelldtm := DTMFromString('mQwAAAHicY2ZgYChjYWDIAOJcII5lhOAwIP75jI/h4Y9fDOeu3GRABoxIGAgAd1wJrA==');
+    Main.exp := 25;
+    result := 'bones to bananas';
+  end else
+  begin
+    Main.spelldtm := DTMFromString('mQwAAAHicY2ZgYLjNwsBwGYivALE1IwODFRAbA/GbChmG1+8/MVx6+JSBHagOhpmRMBAAAKBLCj8=');
+    main.exp := 35.5;
+    result := 'bones to peaches';
+  end;
+end;
+
+function getspell(arena : string) : string;
+begin
+  if Lowercase(Players[CurrentPlayer].Strings[1]) = '' then
+    case Lowercase(arena) of
+      'maze' : result := 'telekinetic grab';
+      'enchant' : result := GetEnchantSpell;
+      'graveyard' : result := GetGraveyardSpell;
+      'alchemy' : result := GetAlchSpell;
+    end else
+    result := Lowercase(Players[CurrentPlayer].Strings[1]);
+end;
+
+function GetStaff : boolean;
+var
+  staffs : TStringArray;
+  i : integer;
+begin
+  result := true;
+  case spellused of
+    'high level alchemy', 'low level alchemy' : staffs := ['Steam battlestaff', 'Fire battlestaff','Mystic lava staff', 'Mystic steam staff', 'Staff of fire', 'Mystic fire staff'];
+    'bones to bananas', 'bones to peaches': staffs := ['Mud battlestaff', 'Mystic mud staff'];
+    'telekinetic grab' : staffs := ['Air battlestaff', 'Mystic air staff', 'Staff of air'];
+    'lvl-1 enchant' : staffs := ['Steam battlestaff', 'Water battlestaff','Mystic mud staff', 'Mystic steam staff', 'Mystic water staff', 'Staff of water'];
+    'lvl-2 enchant' : staffs := ['Air battlestaff','Staff of air', 'Mystic air staff'];
+    'lvl-3 enchant' : staffs := ['Steam battlestaff', 'Fire battlestaff','Staff of fire', 'Mystic fire staff', 'Mystic lava staff', 'Mystic steam staff'];
+    'lvl-4 enchant' : staffs := ['Earth battlestaff','Staff of earth', 'Mystic earth staff', 'Mystic mud staff', 'Mystic lava staff'];
+    'lvl-5 enchant' : staffs := ['Mud battlestaff', 'Mystic mud staff'];
+    'lvl-6 enchant' : staffs := ['Lava battlestaff', 'Mystic lava staff'];
+    else
+      result := false;
+  end;
+  GameTab(TAB_EQUIP);
+  for i := 0 to high(staffs) do
+    if r_GetEquippedNameAt(EQUIPMENT_WEAPON) = staffs[i] then
+      exit;
+  GameTab(tab_Inv);
+  for i := 0 to high(staffs) do
+    if R_ClickItemBy(staffs[i], 'Wield') then
+      exit;
+  result := false;
+end;
+procedure SetUpPlayer; //sets up the player
+var
+  hat : TEquipmentItem;
+  me :TPlayer;
+  spell : TSpell;
+begin
+  if not loggedin then loginplayer;
+
+  setangle(true);
+
+  me := R_GetMe;
+  Startlevel := R_GetSkillLevel(SKILL_MAGIC);
+  writeln('Starting Magic Level: ' + inttostr(StartLevel));
+  Arenas := explode(';', Players[CurrentPlayer].Strings[0]);
+  main.index := lowercase(Arenas[currentarena]);
+  spellused := getspell(main.index);
+  spell := GetSpellInfo(spellused);
+  writeln(spell);
+  Main.exp := spell.Exp;
+  Main.spelldtm := 0;
+  case spellused of
+    'bones to bananas' : Main.spelldtm := DTMFromString('mQwAAAHicY2ZgYChjYWDIAOJcII5lhOAwIP75jI/h4Y9fDOeu3GRABoxIGAgAd1wJrA==');
+    'bones to peaches' : Main.spelldtm := DTMFromString('mQwAAAHicY2ZgYLjNwsBwGYivALE1IwODFRAbA/GbChmG1+8/MVx6+JSBHagOhpmRMBAAAKBLCj8=');
+  end;
+  case main.index of
+    'maze' :
+    begin
+      SetSpellMode(false, false, true, false)
+      Main.MainLoop := @domaze;
+    end;
+    'enchant' :
+    begin
+      SetSpellMode(false, false, false, true);
+      Main.MainLoop := @EnchantMainloop;
+    end;
+    'graveyard' :
+    begin
+      SetSpellMode(false, false, true, false);
+      Main.MainLoop := @GraveyardMainLoop;
+    end;
+    'alchemy' :
+    begin
+      SetSpellMode(false, false, true, false);
+      Main.MainLoop := @AlchemyMainLoop;
+    end;
+  end;
+
+  if not GetStaff then
+  begin
+    a_debug('Cannot find correct staff, terminating');
+    TerminateScript;
+  end;
+
+  if inarena then exit;
+
+
+
+  hat := r_GetEquippedItemAt(EQUIPMENT_HELMET);
+
+  if not (hat.name = 'Progress hat') then
+    if not FindHat then
+    begin
+      a_debug('Cannot find hat, terminating script');
+      TerminateScript;
+    end;
+
+
+
+end;
+
+
+
+function enterarena : boolean;  //enters arena
+var
+  id, i : integer;
+  portal : TRSObject;
+begin
+  result := true;
+  if inarena then exit;
+
+  case main.index of
+    'maze' : id := maze_enter;
+    'enchant' : id := enchant_enter;
+    'alchemy' : id :=  alchemy_enter;
+    'graveyard' : id := graveyard_enter;
+  end;
+
+  portal := GetObjectByIDEx([id], OBJ_INTERACTABLE, 32);
+  if not TileOnMs(portal.Tile, 0) then
+    R_WalkToTile(portal.Tile, 1, 0);
+  MouseTile(portal.Tile, 4, 4, true);
+
+  while not inarena do
+  begin
+    wait(10);
+    inc(i);
+    ClickToContinue;
+    if i > 15 * 100 then
+    begin
+      result := false;
+      exit;
+    end;
+  end;
+end;
+
+begin
+  declareplayers;
+  setupsrl;
+  writeln(5);
+  setupreflection;
+  writeln(0);
+  setupmazes;
+  SetMazePoints;
+  repeat
+    SetUpPlayer;
+    inc(currentarena);
+    SMART_SetupDebug();
+    writeln(3);
+    SetupSRLStats(145, StatsUserId, StatsUserPass);
+    if (StatsUserId = '') or (StatsUserPass = '') then
+      SetupSRLStats(144, 'Anonymous', 'anon1337');
+    writeln(4);
+    gametab(tab_inv);
+    if not enterarena then exit;
+    wait(500 + random(300));
+    StartPoints := getpoints;
+    Main.MainLoop();
+    stats_Commit;
+    FreeDTM(main.spelldtm);
+  until currentarena > high(arenas);
+  ExitToLobby;
+end.

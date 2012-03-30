@@ -1,0 +1,181 @@
+program Untitled;
+//{$DEFINE SMART}
+{$I SRL/SRL.scar}
+
+const
+  StatsUser = ''; //Optional: SRL Stats username. NOT runescape or SRL forums username
+  StatsPass = ''; //Optional: SRL Stats password. NOT runescape or SRL forums password
+
+  DDTMTolerance = 20; //Add to the tolerance if script cannot find steel bar
+
+  MaxMouse = 17; //Maximum mouse speed.
+  MinMouse = 14; //Minimum mouse speed.
+
+  DetailedProggy = true; //True = detail progress report, false = standard
+  DetailedDebug = false; //True = detail debugging, false = no debugging
+
+  ChanceForAntiban = 600; //chance to do antiban while smelting.
+
+procedure DeclarePlayers;
+begin
+  //Disguise('Windows Live Messenger');
+
+  HowManyPlayers:= 1;
+  CurrentPlayer:= 0;
+  NumberOfPlayers(HowManyPlayers);
+
+  Smart_Server := 132;
+  Smart_Members := false;
+  Smart_Signed := true;
+  Smart_SuperDetail := False;
+
+           writeln('calling names');
+  Players[0].Name := ''; // Username.
+  Players[0].Pass := ''; // Password.
+  Players[0].Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+  Players[0].Pin  := '';
+  Players[0].Active := True;
+end;
+
+type
+  TObj = record
+    col, tol : integer;
+    hue, sat : Extended;
+    tpa : TPointArray;
+    count : integer;
+    atpa : T2DPointArray;
+    dist : integer;
+    uptext : string;
+end;
+
+var
+  herbpatch, leprechaun : TObj;
+  ObjArr : Array of TObj;
+
+procedure setuprecords;
+begin
+  with herbpatch do
+  begin
+    col := 2513969;
+    tol := 16;
+    hue := 0;
+    sat := 0;
+    tpa := [point(0, 0)];
+    atpa :=[];
+    dist := 10;
+    uptext := 'erbs';
+  end;
+  with leprechaun do
+  begin
+    col := 1254417;
+    tol := 16;
+    hue := 4.54;
+    sat := 6.767;
+    tpa := [point(0, 0)];
+    atpa :=[];
+    dist := 7;
+    uptext := 'ool';
+  end;
+  ObjArr := [herbpatch, leprechaun];
+end;
+
+const
+  OBJ_PATCH = 0;
+  OBJ_LEPRO = 1;
+  priority_high = 1;
+  priority_low = 0;
+
+procedure A_Debug(text: string; priority : integer);
+begin
+  if priority = 0 then
+    if not DetailedDebug then
+      exit;
+    writeln('|| [' + thetime + '] ' + players[currentplayer].nick + ' || ' + text);
+end;
+
+function NumPerHour(i : extended) : extended;
+begin
+  result := (3600 * i) / (1 + ((GetTimeRunning) / 1000));
+end;
+
+function A_FindObj(obj : integer; left : boolean): Boolean;
+var
+  X, Y, A, M, curCTS: Integer;
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+
+begin
+  Result := False;
+  if (obj > high(obj)) or (obj < 0) then
+  begin
+    a_debug('object index doesnt work, exiting', priority_low);
+    exit;
+  end;
+  with ObjArr[obj] do
+  begin
+    if not LoggedIn then exit;
+    curCTS := GetColorToleranceSpeed;
+      ColorToleranceSpeed(2);
+      if not FindColorsSpiralTolerance(MSCX, MSCY, TPA, Col, MSX1, MSY1, MSX2, MSY2, tol) then
+      begin
+        ColorToleranceSpeed(1);
+        a_debug('Cannot find object', Priority_High);
+        exit;
+      end;
+      ColorToleranceSpeed(1);
+      ATPA := SplitTPA(TPA, dist);
+      M := High(ATPA);
+      for A := 0 to M do
+      begin
+        if Length(ATPA[A]) < count then
+          continue;
+        if MiddleTPAEx(ATPA[A], X, Y) then
+        begin
+          MMouse(X, Y, 6, 6);
+          Wait(100 + Random(50));
+          if WaitUptext(uptext, 100) then
+          begin
+            GetMousePos(X, Y);
+
+            Mouse(X, Y, 0, 0, left);
+            Result := True;
+            ColorToleranceSpeed(curCTS);
+            Exit;
+          end;
+        end;
+      end;
+  end;
+  ColorToleranceSpeed(curCTS);
+end;
+
+function PickHerbs : boolean;
+var
+  s : string;
+begin
+  A_FindObj(OBJ_PATCH, true);
+  while IsMoving do wait(100 + random(100));
+  A_FindObj(OBJ_PATCH, true);
+  s := getuptext;
+  while s = getuptext do wait(100 + random(1000));
+end;
+
+function NoteHerbs : boolean;
+var
+  i, x, y : integer;
+begin
+  i := InvCount;
+  MMouseItem(11);
+  getmousepos(x, y);
+  mouse(x, y, 0, 0, false);
+  ChooseOption('se G');
+  A_FindObj(OBJ_LEPRO, true);
+  while i = invcount do wait(100);
+end;
+
+begin
+  DeclarePlayers;
+  SetupSRL;
+  setuprecords;
+  NoteHerbs;
+  setangle(false);
+end.

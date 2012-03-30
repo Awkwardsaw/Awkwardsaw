@@ -1,0 +1,721 @@
+program Untitled;
+{$DEFINE SMART}
+{$I SRL/SRL.scar}
+{$I SRL/SRL/misc/smartcolors.scar}
+{$I SRL/SRL/misc/stats.simba}
+{$i sps/sps.simba}
+
+{TODO:
+}
+
+//Setup Lines 11 - 62
+
+const
+  StatsUser = ''; //Optional: SRL Stats username. NOT runescape or SRL forums username
+  StatsPass = ''; //Optional: SRL Stats password. NOT runescape or SRL forums password
+
+  SteelBarTolerance = 20; //Add to the tolerance if script cannot find steel bar
+
+  MaxMouse = 17; //Maximum mouse speed.
+  MinMouse = 14; //Minimum mouse speed.
+
+  DetailedProggy = true; //True = detail progress report, false = standard
+  DetailedDebug = false; //True = detail debugging, false = no debugging
+
+  ChanceForAntiban = 600; //chance to do antiban while smelting.
+
+  TakeBreaks = true; //Do you want to take breaks?
+
+  LoadsTillBreak = 12; //Loads to do until break, leave zero if it doesn't matter or not breaking
+  RLoads = 5; //Plus random loads for break
+
+  TimeTillBreak = 60; //Minuts until break, leave zero if it doesn't matter or not breaking
+  RTime = 20; //Plus random minuts for break
+
+  {
+   NOTE: If using multi player, script just switches to a random active player.
+   If there is only one active player, script will log out for certain amound of time
+  }
+  TimeToBreak = 5; //minuts to break
+  RBreak = 5; //Plus random minuts to break for
+
+procedure DeclarePlayers;
+begin
+  //Disguise('Windows Live Messenger');
+
+  HowManyPlayers:= 3;
+  CurrentPlayer:= 0;
+  NumberOfPlayers(HowManyPlayers);
+
+  Smart_Server := 5;
+  Smart_Members := false;
+  Smart_Signed := true;
+  Smart_SuperDetail := False;
+
+  writeln('Declaring Players');
+
+  with Players[0] do
+  begin
+    Name := ''; // Username.
+    Pass := ''; // Password.
+    Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+    Pin  := ''; //Players PIN. leave blank if you dont have one
+    Loc  := 'eb'; //Location of player. Either 'eb' or 'akb'
+                   //'eb' = edgeville bank
+                   //'akb' = Al Karid bank
+    Active := True;
+  end;
+
+  {with Players[1] do
+  begin
+    Name := ''; // Username.
+    Pass := ''; // Password.
+    Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+    Pin  := ''; //Players PIN. leave blank if you dont have one
+    Loc  := 'eb'; //Location of player. Either 'eb' or 'akb'
+    Active := True;
+  end;
+
+  with Players[2] do
+  begin
+    Name := ''; // Username.
+    Pass := ''; // Password.
+    Nick := '';    // 2-4 letters of Username (that are not capital letters or numbers).
+    Pin  := ''; //Players PIN. leave blank if you dont have one
+    Loc  := 'eb'; //Location of player. Either 'eb' or 'akb'
+    Active := True;
+  end;}
+
+end;
+
+//DO NOT EDIT ANYTHING BELOW
+//unless you know what your doing, ofcourse :)
+
+const
+  LOC_LOST = -1;
+  LOC_FURNACE = 0;
+  LOC_BANK = 1;
+  FURNACE = 'furnace';
+  Edge_ToFurnace = 0;
+  Edge_ToBank = 1;
+  Priority_High = 1;
+  Priority_Low = 0;
+
+  SteelBarID = 'http://services.runescape.com/m=itemdb_rs/Steel_bar/viewitem.ws?obj=2353';
+  CannonballID = 'http://services.runescape.com/m=itemdb_rs/Cannonball/viewitem.ws?obj=2';
+
+type
+  TWalking = record
+    p : TPoint;
+    color, tol, DDTM : integer;
+end;
+
+var
+  LastTrip : Boolean;
+  TotalLoadsDone, TotalBanksDone, BarsStart, BarsEnd, AntibansDone, BreaksDone,
+  TimeBreaking, TimeSinceBreak, LoadsSinceBreak, TimeSinceLastCommit : Integer;
+  SteelBarPrice, CannonballPrice, ProfitPerBar : integer;
+  FurnaceColor : integer;
+  exp : extended;
+  BankSPSPoint, FurnaceSPSPoint : TPoint;
+  ToBankPath, ToFurnacePath : TPointArray;
+
+procedure A_Debug(text: string; priority : integer);
+begin
+  if priority = 0 then
+    if not DetailedDebug then
+      exit;
+    writeln('|| [' + thetime + '] ' + players[currentplayer].nick + ' || ' + text);
+end;
+
+function NumPerHour(i : extended) : extended;
+begin
+  result := (3600 * i) / (1 + ((GetTimeRunning) / 1000));
+end;
+
+procedure GetPrice;
+var
+  page : string;
+begin
+  page := getpage(SteelBarID);
+  page := trim(Between('<b>Current guide price:</b> ', '<br>', page));
+  SteelBarPrice := StrToIntDef(page, -1);
+
+  page := getpage(CannonballID);
+  page := trim(Between('<b>Current guide price:</b> ', '<br>', page));
+  CannonballPrice := StrToIntDef(page, -1);
+
+  ProfitPerBar := (CannonballPrice * 4) - SteelBarPrice;
+end;
+
+Procedure A_Antiban(percentage : integer);
+var
+  c : integer;
+begin
+ c := random(percentage);
+ if c < 21 then
+   inc(AntibansDone);
+ case c of
+  0..2: Gametab(randomrange(tab_Combat, tab_Notes));
+  3..6: wait(1000 + random(3000));
+  7..9: begin
+           MakeCompass(IntToStr(random(180)));
+           MakeCompass(IntToStr(random(1)));
+         end;
+  10: HoverSkill('smithing', false);
+  11..13: PickUpMouse;
+  14..25: RandomMovement;
+ end;
+ findnormalrandoms;
+end;
+
+function GetLocation : Integer;
+var
+  FurnaceMMPos, MySPSPos : TPoint;
+  BankBox, FurnaceBox : TBox;
+begin
+  result := LOC_LOST;
+  a_debug('Finding location', Priority_Low);
+  case lowercase(Players[CurrentPlayer].loc) of
+    'eb' :
+    begin
+      FurnaceMMPos := SPS_PosToMM(point(4249, 2633));
+      if Distance(mmcx, mmcy, FurnaceMMPos.x, FurnaceMMPos.y) > 25 then
+        begin
+          if SPS_PosOnMM(point(4201, 2642)) then
+            result := LOC_BANK;
+        end else
+         result := LOC_FURNACE;
+    end;
+
+    'akb':
+    begin
+      BankBox := IntToBox(4876, 3943, 4912, 4001);
+      FurnaceBox := IntToBox(4895, 3880, 4940, 3907);
+      MySPSPos := SPS_GetMyPos;
+      if PointInBox(MySPSPos, BankBox) then
+        result := LOC_BANK
+      else
+        if PointInBox(MySPSPos, FurnaceBox) then
+          result := LOC_FURNACE;
+    end;
+
+  end;
+
+end;
+
+function A_FindObj(color, tol, count : integer; uptext : string; left : boolean): Boolean;
+var
+  X, Y, A, M, curCTS: Integer;
+  TPA: TPointArray;
+  ATPA: T2DPointArray;
+
+begin
+  Result := False;
+  if not LoggedIn then exit;
+  curCTS := GetColorToleranceSpeed;
+    ColorToleranceSpeed(2);
+    if not FindColorsSpiralTolerance(MSCX, MSCY, TPA, Color, MSX1, MSY1, MSX2, MSY2, tol) then
+    begin
+      ColorToleranceSpeed(1);
+      a_debug('Cannot find object', Priority_High);
+      exit;
+    end;
+    ColorToleranceSpeed(1);
+    ATPA := TPAtoATPAEx(TPA, 10, 10);
+    M := High(ATPA);
+    for A := 0 to M do
+    begin
+      if Length(ATPA[A]) < count then
+        continue;
+      if MiddleTPAEx(ATPA[A], X, Y) then
+      begin
+        MMouse(X, Y, 6, 6);
+        Wait(100 + Random(50));
+        if WaitUptext(uptext, 100) then
+        begin
+          GetMousePos(X, Y);
+
+          Mouse(X, Y, 0, 0, left);
+          Result := True;
+          ColorToleranceSpeed(curCTS);
+          Exit;
+        end;
+      end;
+    end;
+  ColorToleranceSpeed(curCTS);
+end;
+
+function SteelBarDDTM: Integer;
+var
+  dtmMainPoint: TDTMPointDef;
+  dtmSubPoints: Array [0..2] of TDTMPointDef;
+  TempTDTM: TDTM;
+begin
+  dtmMainPoint.x := 347;
+  dtmMainPoint.y := 182;
+  dtmMainPoint.AreaSize := 1;
+  dtmMainPoint.AreaShape := 0;
+  dtmMainPoint.Color := 6316132;
+  dtmMainPoint.Tolerance := SteelBarTolerance; // change tolerance
+
+  dtmSubPoints[0].x := 347;
+  dtmSubPoints[0].y := 182;
+  dtmSubPoints[0].AreaSize := 1;
+  dtmSubPoints[0].AreaShape := 0;
+  dtmSubPoints[0].Color := 6316132;
+  dtmSubPoints[0].Tolerance := SteelBarTolerance;
+
+  dtmSubPoints[1].x := 341;
+  dtmSubPoints[1].y := 189;
+  dtmSubPoints[1].AreaSize := 1;
+  dtmSubPoints[1].AreaShape := 0;
+  dtmSubPoints[1].Color := 3684410;
+  dtmSubPoints[1].Tolerance := SteelBarTolerance;
+
+  dtmSubPoints[2].x := 353;
+  dtmSubPoints[2].y := 185;
+  dtmSubPoints[2].AreaSize := 1;
+  dtmSubPoints[2].AreaShape := 0;
+  dtmSubPoints[2].Color := 8158594;
+  dtmSubPoints[2].Tolerance := SteelBarTolerance;
+
+  TempTDTM.MainPoint := dtmMainPoint;
+  TempTDTM.SubPoints := dtmSubPoints;
+  Result := AddDTM(TempTDTM);
+end;
+
+function Bank : boolean;
+var
+  x, y, SteelBarDTM, location : integer;
+begin
+  result := false;
+
+  if not loggedin then
+  begin
+    loginplayer;
+    location := GetLocation;
+    case location of
+      LOC_LOST : exit;
+      LOC_BANK :
+      begin
+        result := true;
+        exit;
+      end;
+    end;
+  end;
+
+  SteelBarDTM := SteelBarDDTM;
+  SetDTMName(SteelBarDTM, 'Bank Steel Bar DTM');
+  if CountItems('dtm', SteelBarDTM, []) > 12 then
+  begin
+    freedtm(SteelBarDTM);
+    result := true;
+    exit;
+  end;
+
+  {if A_FindObj(4137774, 7, 5, 'anker', false) then
+  begin
+    writeln(0);
+    if WaitOption('ank Banker', 5000) then
+    begin
+      writeln(10);
+      wait(500 + random(500));
+      while (not bankscreen) or (not PinScreen) do wait(10);
+      writeln('1');
+      if pinscreen then
+        if not InPin(Players[CurrentPlayer].Pin) then
+        begin
+          A_Debug('Cannot open bank, failed at pin', Priority_High);
+          exit;
+        end;
+        writeln('2');
+      while not bankscreen do wait(10);
+      writeln('3');
+    end else
+    begin
+      A_Debug('Failed to open bank, failed at chooseoption', Priority_High);
+      exit;
+    end;
+  end else}
+  if not OpenBankNPC then
+  begin
+    MakeCompass(90);
+    a_debug('Cannot find banker, attempting to relocate', Priority_High);
+    FindNormalRandoms;
+    if not OpenBankNPC then
+    SPS_WalkToPos(point(4205, 2647));
+    if not OpenBankNPC then
+      if not OpenBankFast(Players[CurrentPlayer].Loc) then exit;
+  end;
+  while not BankScreen do
+  begin
+    wait(100 + random(100));
+    FindNormalRandoms;
+  end;
+
+  Deposit(3, 28, true);
+
+  if not FindItem(x, y, 'dtm', SteelBarDTM, MBX1, MBY1, MBX2, MBY2, []) then
+  begin
+    FixBank;
+    if not FindItem(x, y, 'dtm', SteelBarDTM, MBX1, MBY1, MBX2, MBY2, []) then
+    begin
+      a_debug('Place steel bars so they are visible in the top of the bank', Priority_High);
+      freedtm(SteelBarDTM);
+      CloseBank;
+      exit;
+    end;
+  end;
+
+  if TotalBanksDone < 1 then
+  begin
+    BarsStart := ItemAmount('bank', 'dtm', SteelBarDTM, []);
+    if TotalLoadsDone = 1 then
+      IncEx(BarsStart, 26);
+    a_debug('Bars Starting with: ' + inttostr(BarsStart), Priority_Low);
+  end;
+
+  BarsEnd := ItemAmount('bank', 'dtm', SteelBarDTM, []);
+  if BarsEnd <= 26 then
+    LastTrip := true;
+  A_Debug('Bars left: ' + inttostr(BarsEnd) + '. Last Trip: ' + booltostr(LastTrip), Priority_Low);
+
+  mmouse(x, y, 5, 5);
+  WaitUptext('eel bar', 5000);
+  getmousepos(x, y);
+  mouse(x, y, 0, 0, false);
+  WaitOption('ithdraw-All', 5000);
+
+  while not ExistsItemDTM(SteelBarDTM, x, y) do
+    wait(100 + random(100));
+
+  if random(4) = 0 then
+  CloseBank;
+
+  freedtm(SteelBarDTM);
+  result := InvCount > 2;
+  if not result then
+    a_debug('Messed up banking, failed to withdraw items', Priority_High);
+  SetAngle(true);
+  MakeCompass(0);
+  inc(TotalBanksDone);
+end;
+
+function SmeltBalls : Boolean;
+var
+  SteelBarDTM,  MenuDTM, BarSlot, location : integer;
+  x, y, t, returns : integer;
+  r : boolean;
+label
+  start;
+begin
+  if not loggedin then
+  begin
+    loginplayer;
+    location := GetLocation;
+    case location of
+      LOC_LOST : exit;
+      LOC_BANK :
+      begin
+        result := true;
+        exit;
+      end;
+    end;
+  end;
+
+  SteelBarDTM := SteelBarDDTM;
+  //CannonballDTM := DTMFromString('mWAAAAHicY2FgYMhhYmBIBOIiIM4H4qdAsSdAfA+IXwGxpro6g7SUFIOOlhaYzQoUQ8aMaBgEALR5ByE=');
+  MenuDTM := DTMFromString('mWAAAAHicY2FgYPgHxG+BWJiRgUESiGcD8V4g3g/EW4BYU12d4f8MeThmBapFxoxoGAQAU50Kng==');
+
+  start:
+  if returns > 6 then exit;
+  result := false;
+
+  if FindDTM(SteelBarDTM, x, y, mix1, miy1, mix2, miy2) then
+  begin
+    BarSlot := CoordsToItem(X, Y);
+    if not ItemActivated(BarSlot) then
+      mouseitem(BarSlot, true);
+    if {SmartColors(FURNACE)} A_FindObj(FurnaceColor, 7, 25, 'nace', true) then
+    begin
+      marktime(t);
+      a_debug('waiting for menu', Priority_Low);
+      r := false;
+      while not FindDTM(MenuDTM, x, y, 112, 384, 362, 467) do
+      begin
+        wait(10 + random(100));
+        if TimeFromMark(t) > (5000 + random(1000)) then
+        begin
+          a_debug('Failed to open smelting menu, trying again', Priority_High);
+          //freedtm(MenuDTM);
+          inc(returns);
+          r := true;
+          break;
+        end;
+      end;
+      if r then
+       goto start;
+      freedtm(MenuDTM);
+
+      mmouse(x, y, 5, 5);
+      wait(200 + random(500));
+      if waituptext('e All', 5000) then
+      begin
+        getmousepos(x, y);
+        mouse(x, y, 0, 0, true);
+      end else
+      begin
+        a_debug('Smelting menu uptext: ' + GetUpText, Priority_High);
+        a_debug('Change "Make" setting to All', Priority_High);
+        exit;
+      end;
+      a_debug('started smelting', Priority_Low);
+    end else
+    begin
+      a_debug('Cannot find furnace, trying to relocate and try again', Priority_High);
+      findnormalrandoms;
+      if not SPS_WalkToPos(point(4249, 2633)) then
+      begin
+        a_debug('Failed to walk to furnace again, you must be lost.', Priority_High);
+        exit;
+      end;
+      inc(returns);
+      goto start;
+    end;
+    while ExistsItemDTM(SteelBarDTM, x, y) do
+    begin
+      A_Antiban(ChanceForAntiban);
+      wait(100 + random(300));
+      FindNormalRandoms;
+      LevelUp;
+    end;
+    a_debug('Finished smelting balls, returning to bank', Priority_Low);
+  end else
+  begin
+    a_debug('Cannot find steel bar', Priority_High);
+    freedtm(SteelBarDTM);
+    result := true;
+    exit;
+  end;
+  //BallsEnd := ItemAmount('inv', 'dtm', CannonballDTM, [])
+  freedtm(SteelBarDTM);
+  //freedtm(CannonballDTM);
+  result := true;
+  SetAngle(true);
+  MakeCompass(0);
+  inc(TotalLoadsDone);
+  stats_SetVariable('Cannonballs (Made)', 104);
+  stats_SetVariable('Smithing EXP (Gained)', (26 * 25));
+  stats_SetVariable('Profit Made', (26 * ProfitPerBar));
+end;
+
+procedure PrintProgress;
+var
+  profit : integer;
+begin
+  if TimeFromMark(TimeSinceLastCommit) > 1000 * 60 * 6 then
+  begin
+    A_Debug('Attempting to commit to stats', Priority_Low);
+    if stats_Commit then
+    begin
+      marktime(TimeSinceLastCommit);
+      A_Debug('Commited stats', Priority_High);
+    end else
+      A_Debug('Failed to commit stats', Priority_High);
+  end;
+  exp := TotalLoadsDone * 26 * 25;
+  profit := ProfitPerBar * (26 * TotalLoadsDone);
+
+  if DetailedProggy then
+  begin
+    writeln(' ');
+    writeln('------------ Ares Assistant -----------');
+    writeln('- Time Running: ' + timerunning);
+    writeln('- Number of Trips(per hour): ' + inttostr(TotalLoadsDone) + '(' + inttostr(floor(NumPerHour(TotalLoadsDone))) + ')');
+    writeln('- Experience Gained(per hour): ' + FloatToStr(exp) + '(' + inttostr(floor(NumPerHour(exp))) + ')');
+    writeln('- Steel Bars Smelted(per hour): ' + IntToStr(BarsStart - BarsEnd) + '(' + inttostr(floor(NumPerHour(BarsStart - BarsEnd))) + ')');
+    writeln('- Steel Bars Remaining: ' + IntToStr(BarsEnd));
+    writeln('- Profit made(Per hour): ' + intToStr(profit) + '(' + inttostr(floor(NumPerHour(profit))) + ')');
+    writeln('- Profit per bar: ' + IntToStr(ProfitPerBar));
+    writeln('- Antibans Performed: ' + IntToStr(AntibansDone));
+    writeln('- Antibans Performed Per Hour: ' + IntToStr(floor(NumPerHour(AntibansDone))));
+    writeln('- Breaks Performed: ' + IntToStr(BreaksDone));
+    writeln('- Total Time Breaking: ' + IntToStr(TimeBreaking));
+    writeln('---------------------------------------');
+    writeln(' ');
+  end else
+  begin
+    writeln(' ');
+    writeln('------------ Ares Assistant -----------');
+    writeln('- Time Running: ' + timerunning);
+    writeln('- Number of Trips(per hour): ' + inttostr(TotalLoadsDone) + '(' + inttostr(floor(NumPerHour(TotalLoadsDone))) + ')');
+    writeln('- Experience Gained(per hour): ' + FloatToStr(exp) + '(' + inttostr(floor(NumPerHour(exp))) + ')');
+    writeln('- Steel Bars Smelted(per hour): ' + IntToStr(BarsStart - BarsEnd) + '(' + inttostr(floor(NumPerHour(BarsStart - BarsEnd))) + ')');
+    writeln('- Profit made(Per hour): ' + intToStr(profit) + '(' + inttostr(floor(NumPerHour(profit))) + ')');
+    writeln('- Breaks Performed: ' + IntToStr(BreaksDone));
+   writeln('---------------------------------------');
+   writeln(' ');
+  end;
+end;
+
+Function NeedBreak : boolean;
+begin
+  result := false;
+  if not TakeBreaks then exit;
+  if LoadsTillBreak > 0 then
+    if LoadsSinceBreak >= LoadsTillBreak + random(RLoads) then
+    begin
+      result := true;
+      LoadsSinceBreak := 0;
+      exit;
+    end;
+  if TimeTillBreak > 0 then
+    result := (timefrommark(TimeSinceBreak) / 60000) >= TimeTillBreak + random(RTime);
+end;
+
+Function DoBreak : Boolean;
+var
+  time2break, breakingfor : integer;
+begin
+  result := false;
+  if not NeedBreak then exit;
+  inc(BreaksDone);
+  Logout;
+  if PlayersActive > 1 then
+  begin
+    a_debug('Player is taking break, switching to random player', Priority_High);
+    RandomNextPlayer(true);
+    LogInPlayer;
+  end else
+    if PlayersActive = 1 then
+    begin
+      time2break := TimeToBreak + random(RBreak);
+      a_debug('Taking Break for: ' + inttostr(time2break), Priority_High);
+      marktime(breakingfor);
+      while timefrommark(breakingfor) <= time2break * 60000 + random(60000) do
+      begin
+        wait(60000);
+        //a_debug(inttostr(ceil(breakingfor / 60000)) + ' minuts has passed', Priority_Low);
+      end;
+      loginplayer;
+    end;
+  marktime(TimeSinceBreak);
+  TimeBreaking := TimeBreaking + time2break;
+end;
+
+procedure SetUpPlayerLoc;
+begin
+  case lowercase(Players[CurrentPlayer].loc) of
+    'eb' :
+    begin
+      SPS_Setup(RUNESCAPE_SURFACE, ['10_6']);
+      BankSPSPoint := point(4205, 2647);
+      FurnaceSPSPoint := point(4249, 2633);
+      ToBankPath := [BankSPSPoint];
+      ToFurnacePath := [FurnaceSPSPoint];
+      FurnaceColor := 1384337;
+    end;
+    'akb' :
+    begin
+      SPS_Setup(RUNESCAPE_SURFACE, ['12_9']);
+      BankSPSPoint := point(4896, 3964);
+      FurnaceSPSPoint := point(4920, 3897);
+      ToBankPath := [point(4930, 3935), BankSPSPoint];
+      ToFurnacePath := [point(4930, 3935), FurnaceSPSPoint];
+      FurnaceColor := 3289652;
+    end;
+  end;
+end;
+
+var
+  StartLoc, i, TimesLost : integer;
+begin
+  DeclarePlayers;
+  SetupSRLStats(206, StatsUser, StatsPass);
+  if (StatsUser = '') or  (StatsPass = '') then
+   SetupSRLStats(206, 'Anonymous', 'anon1337');
+  SetupSRL;
+  writeln('Gathering prices');
+  GetPrice;
+  if SteelBarPrice or CannonballPrice < 0 then
+    writeln('Failed to get prices')
+  else
+    writeln('You will be getting: ' + IntToStr(ProfitPerBar) + 'gp profit per bar');
+  MouseSpeed := RandomRange(MinMouse, MaxMouse);
+  //MakeObj(FURNACE, 6187373, 7, 0.30, 0.18, ['urnace', 'Furnace'], ['ar -> Furnace']);
+  // furnace: 4249, 2633
+  ActivateClient;                        // bank: 4201, 2642
+  if not loggedin then loginplayer;
+  SetAngle(true);
+  MakeCompass(0);
+  SetUpPlayerLoc;
+  StartLoc := GetLocation;
+  a_debug('Starting location: ' + inttostr(StartLoc), Priority_Low);
+  MarkTime(TimeSinceBreak);
+  MarkTime(TimeSinceLastCommit);
+  repeat
+    case GetLocation of
+      LOC_BANK :
+      begin
+        a_debug('Current location: Bank', Priority_Low);
+        if not bank then
+        begin
+          NextPlayer(false);
+          continue;
+        end;
+        for i := 0 to high(ToFurnacePath) do
+          SPS_WalkToPos(ToFurnacePath[i]); //to furnace
+        //wait(1500 + random(500));
+      end;
+
+      LOC_FURNACE :
+      begin
+        a_debug('Current location: Furnace', Priority_Low);
+        if not SmeltBalls then
+        begin
+          NextPlayer(false);
+          continue;
+        end;
+        for i := 0 to high(ToBankPath) do
+          SPS_WalkToPos(ToBankPath[i]); //to bank
+        //wait(1500 + random(500));
+        PrintProgress;
+        inc(LoadsSinceBreak);
+        if LastTrip then
+        begin
+          NextPlayer(false);
+          SetUpPlayerLoc;
+          MarkTime(Players[CurrentPlayer].Worked);
+          continue;
+        end;
+      end;
+
+      LOC_LOST :
+      begin
+        A_Debug('Player is lost, attempting to walk back to bank', Priority_High);
+        if not FindNormalRandoms then
+          inc(TimesLost);
+        if TimesLost > 4 then
+        begin
+          PrintProgress;
+          exit;
+        end;
+        if not SPS_WalkToPos(ToBankPath[high(ToBankPath)]) then
+        for i := 0 to high(ToBankPath) do
+          SPS_WalkToPos(ToBankPath[i]);
+        if GetLocation = LOC_LOST then
+        begin
+          PrintProgress;
+          exit;
+        end;
+      end;
+    end;
+
+    if TotalLoadsDone mod randomrange(5, 10) = 0 then
+      MouseSpeed := RandomRange(MinMouse, MaxMouse);
+
+    DoBreak;
+
+  until AllPlayersInactive;
+end.
